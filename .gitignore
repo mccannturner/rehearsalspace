@@ -1,0 +1,38 @@
+# Node modules
+node_modules/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Builds / bundled output
+dist/
+build/
+
+# Media / large recordings
+*.wav
+*.mp3
+*.ogg
+*.webm
+*.m4a
+*.mov
+*.mp4
+
+# Env / secrets
+.env
+.env.local
+
+# Electron / binary junk
+*.asar
+*.dll
+*.exe
+*.pak
+*.dat
+*.bin
+*.cache
+electron/

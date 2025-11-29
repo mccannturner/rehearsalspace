@@ -1,0 +1,17 @@
+{
+  "name": "remote-rehearsal-app",
+  "version": "1.0.0",
+  "description": "Prototype remote rehearsal tool",
+  "main": "main.js",
+  "scripts": {
+    "desktop": "electron .",
+    "web": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "electron": "^39.2.3"
+  }
+}
