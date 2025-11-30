@@ -367,8 +367,8 @@
             width: 6px;
             height: 6px;
             border-radius: 50%;
-            background: #2ECC71;
-        }
+            background: #C0C0C7; /* neutral gray */
+    }
 
         /* Layout specifics */
         .card-room {
@@ -563,9 +563,9 @@
 
 <div class="latency-row">
     <div id="latency-display">Latency: -- (waiting for other users)</div>
-    <div class="status-pill">
-        <span class="status-dot"></span>
-        Live audio
+    <div class="status-pill" id="audio-status-pill">
+        <span class="status-dot" id="audio-status-dot"></span>
+        <span id="audio-status-text">Not in room</span>
     </div>
 </div>
 

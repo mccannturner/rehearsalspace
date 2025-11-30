@@ -21,6 +21,9 @@ const roomStatus = document.getElementById("room-status");
 const userList = document.getElementById("user-list");
 const latencyDisplay = document.getElementById("latency-display");
 const latencyStats = document.getElementById("latency-stats");
+const audioStatusPill = document.getElementById("audio-status-pill");
+const audioStatusDot = document.getElementById("audio-status-dot");
+const audioStatusText = document.getElementById("audio-status-text");
 
 const chatMessages = document.getElementById("chat-messages");
 const chatInput = document.getElementById("chat-input");
@@ -80,9 +83,10 @@ function createRandomUserId() {
 function updateRoomStatus() {
     if (!currentRoomId) {
         roomStatus.textContent = "Not in a room";
-        return;
+    } else {
+        roomStatus.textContent = `In room: ${currentRoomId} (you: ${myUserId || "unknown"})`;
     }
-    roomStatus.textContent = `In room: ${currentRoomId} (you: ${myUserId || "unknown"})`;
+    updateAudioStatus();
 }
 
 function updateUserList() {
@@ -149,6 +153,44 @@ function updateLatencyStats() {
     latencyStats.textContent =
         `Avg: ${avg.toFixed(1)} ms · Min: ${min} · Max: ${max} · ` +
         `Jitter: ${jitter.toFixed(1)} ms (${latencySamples.length} samples)`;
+}
+
+function updateAudioStatus() {
+    if (!audioStatusPill || !audioStatusDot || !audioStatusText) return;
+
+    const inRoom = !!currentRoomId;
+
+    const hasLocal =
+        !!(localStream &&
+           localStream.getAudioTracks().some(
+               (t) => t.enabled && t.readyState === "live"
+           ));
+
+    const hasRemote = remoteAudioElements.size > 0;
+
+    let text = "Not in room";
+    let pillBg = "#EEE9E0";      // neutral
+    let dotColor = "#C0C0C7";    // neutral grey
+
+    if (!inRoom) {
+        text = "Not in room";
+    } else if (!hasLocal) {
+        text = "Mic not sending";
+        pillBg = "#FDECEA";      // pale red
+        dotColor = "#D64545";    // red
+    } else if (hasLocal && !hasRemote) {
+        text = "Live: waiting for others";
+        pillBg = "#E7F3FF";      // pale blue
+        dotColor = "#2E6DD8";    // blue
+    } else if (hasLocal && hasRemote) {
+        text = "Live: sending & receiving";
+        pillBg = "#E4F7E7";      // pale green
+        dotColor = "#2ECC71";    // green
+    }
+
+    audioStatusPill.style.backgroundColor = pillBg;
+    audioStatusDot.style.backgroundColor = dotColor;
+    audioStatusText.textContent = text;
 }
 
 // ========= SOCKET HANDLING =========
@@ -285,6 +327,7 @@ async function getLocalStream() {
         micMonitorGain.connect(audioContext.destination);
         localSource.connect(recordDestination);
 
+        updateAudioStatus();
         return localStream;
     } catch (err) {
         console.error("Microphone access failed:", err);
@@ -436,6 +479,8 @@ function handleRemoteStream(userId, stream) {
         document.body.appendChild(audio);
         remoteAudioElements.set(userId, audio);
 
+        updateAudioStatus();
+        
         console.log("Created HTMLAudioElement for remote user (simple mode):", userId);
 
         // Explicitly try to start playback and log if it fails
@@ -480,6 +525,7 @@ function teardownPeer(userId) {
         } catch (e) {}
         remoteAudioElements.delete(userId);
     }
+    updateAudioStatus();
 }
 
 // ========= CHAT =========
@@ -707,3 +753,5 @@ muteRemoteCheckbox.addEventListener("change", () => {
 updateRoomStatus();
 updateLatencyDisplay(null);
 updateLatencyStats();
+updateAudioStatus();
+// End of script.js
