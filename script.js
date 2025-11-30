@@ -84,16 +84,38 @@ function updateRoomStatus() {
     if (!currentRoomId) {
         roomStatus.textContent = "Not in a room";
     } else {
-        roomStatus.textContent = `In room: ${currentRoomId} (you: ${myUserId || "unknown"})`;
+        roomStatus.textContent = `In room: ${currentRoomId}`;
     }
     updateAudioStatus();
 }
 
 function updateUserList() {
     userList.innerHTML = "";
-    usersInRoom.forEach((uid) => {
+
+    if (!usersInRoom.length) {
         const li = document.createElement("li");
-        li.textContent = uid === myUserId ? `${uid} (you)` : uid;
+        li.textContent = "No one here yet.";
+        userList.appendChild(li);
+        return;
+    }
+
+    // Put "You" first, then bandmates
+    const sorted = [...usersInRoom];
+    sorted.sort((a, b) => {
+        if (a === myUserId) return -1;
+        if (b === myUserId) return 1;
+        return 0;
+    });
+
+    let bandmateNumber = 1;
+
+    sorted.forEach((uid) => {
+        const li = document.createElement("li");
+        if (uid === myUserId) {
+            li.textContent = "You";
+        } else {
+            li.textContent = `Bandmate ${bandmateNumber++}`;
+        }
         userList.appendChild(li);
     });
 }
