@@ -21,9 +21,14 @@ const roomStatus = document.getElementById("room-status");
 const userList = document.getElementById("user-list");
 const latencyDisplay = document.getElementById("latency-display");
 const latencyStats = document.getElementById("latency-stats");
+
 const audioStatusPill = document.getElementById("audio-status-pill");
 const audioStatusDot = document.getElementById("audio-status-dot");
 const audioStatusText = document.getElementById("audio-status-text");
+
+const inviteLinkInput = document.getElementById("invite-link");
+const inviteCopyButton = document.getElementById("invite-copy");
+const inviteCopiedLabel = document.getElementById("invite-copied");
 
 const chatMessages = document.getElementById("chat-messages");
 const chatInput = document.getElementById("chat-input");
@@ -87,6 +92,7 @@ function updateRoomStatus() {
         roomStatus.textContent = `In room: ${currentRoomId}`;
     }
     updateAudioStatus();
+    updateInviteLink();
 }
 
 function updateUserList() {
@@ -175,6 +181,24 @@ function updateLatencyStats() {
     latencyStats.textContent =
         `Avg: ${avg.toFixed(1)} ms · Min: ${min} · Max: ${max} · ` +
         `Jitter: ${jitter.toFixed(1)} ms (${latencySamples.length} samples)`;
+}
+
+function updateInviteLink() {
+    if (!inviteLinkInput || !inviteCopyButton || !inviteCopiedLabel) return;
+
+    if (!currentRoomId) {
+        inviteLinkInput.value = "";
+        inviteLinkInput.placeholder = "Join a room to get an invite link";
+        inviteCopyButton.disabled = true;
+        inviteCopiedLabel.style.display = "none";
+        return;
+    }
+
+    const url = new URL(window.location.href);
+    url.searchParams.set("room", currentRoomId);
+
+    inviteLinkInput.value = url.toString();
+    inviteCopyButton.disabled = false;
 }
 
 function updateAudioStatus() {
@@ -770,6 +794,42 @@ muteRemoteCheckbox.addEventListener("change", () => {
     });
 });
 
+if (inviteCopyButton) {
+    inviteCopyButton.addEventListener("click", async () => {
+        if (!inviteLinkInput.value) return;
+
+        inviteCopiedLabel.style.display = "none";
+
+        const text = inviteLinkInput.value;
+
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(text);
+            } else {
+                // Fallback for older browsers
+                inviteLinkInput.select();
+                document.execCommand("copy");
+                inviteLinkInput.blur();
+            }
+
+            inviteCopiedLabel.style.display = "block";
+            setTimeout(() => {
+                inviteCopiedLabel.style.display = "none";
+            }, 2000);
+        } catch (err) {
+            console.warn("Copy failed", err);
+            alert("Could not copy the link. You can copy it manually.");
+        }
+    });
+}
+
+// Check URL for ?room=... and pre-fill the room name
+const urlParams = new URLSearchParams(window.location.search);
+const initialRoom = urlParams.get("room");
+if (initialRoom) {
+    roomInput.value = initialRoom;
+    roomStatus.textContent = `Ready to join: ${initialRoom}`;
+}
 
 // Initial
 updateRoomStatus();
