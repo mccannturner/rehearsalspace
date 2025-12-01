@@ -5,10 +5,15 @@ const { WebSocketServer } = require("ws");
 
 const app = express();
 
-// Serve static files (index.html, script.js, assets, etc.)
-app.use(express.static(__dirname));
+// Serve pages first
 
+// Homepage (marketing)
 app.get("/", (req, res) => {
+    res.sendFile(path.join(__dirname, "landing.html"));
+});
+
+// App UI
+app.get("/app", (req, res) => {
     res.sendFile(path.join(__dirname, "index.html"));
 });
 
@@ -16,6 +21,9 @@ app.get("/", (req, res) => {
 app.get("/favicon.ico", (req, res) => {
     res.sendFile(path.join(__dirname, "assets", "rehearsal-space-1024.png"));
 });
+
+// Serve static files (script.js, assets, etc.) AFTER routes
+app.use(express.static(__dirname));
 
 // Create a single HTTP server for both HTTP + WebSocket
 const server = http.createServer(app);
