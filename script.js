@@ -43,7 +43,6 @@ const metronomeVolumeSlider = document.getElementById("metronome-volume");
 const recordButton = document.getElementById("record");
 const recordingsContainer = document.getElementById("recordings");
 
-const micMonitorSlider = document.getElementById("mic-monitor-volume");
 const remoteVolumeSlider = document.getElementById("remote-volume");
 const muteRemoteCheckbox = document.getElementById("mute-remote");
 
@@ -64,7 +63,6 @@ let latencySamples = [];
 let localStream = null;
 let audioContext = null;
 let localSource = null;
-let micMonitorGain = null;
 let recordDestination = null;
 
 const peerConnections = new Map();        // userId -> RTCPeerConnection
@@ -364,13 +362,8 @@ async function getLocalStream() {
 
         localSource = audioContext.createMediaStreamSource(localStream);
 
-        micMonitorGain = audioContext.createGain();
-        micMonitorGain.gain.value = micMonitorSlider.value / 100;
-
+        // Only route mic into the recording destination for local recording.
         recordDestination = audioContext.createMediaStreamDestination();
-
-        localSource.connect(micMonitorGain);
-        micMonitorGain.connect(audioContext.destination);
         localSource.connect(recordDestination);
 
         updateAudioStatus();
@@ -769,12 +762,6 @@ recordButton.addEventListener("click", () => {
         startRecording();
     } else {
         stopRecording();
-    }
-});
-
-micMonitorSlider.addEventListener("input", () => {
-    if (micMonitorGain) {
-        micMonitorGain.gain.value = micMonitorSlider.value / 100;
     }
 });
 
