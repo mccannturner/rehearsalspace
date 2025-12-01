@@ -356,9 +356,17 @@ async function getLocalStream() {
         console.log("🎙️ Microphone access granted");
 
         if (!audioContext) {
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        }
-        await audioContext.resume();
+    const AC = window.AudioContext || window.webkitAudioContext;
+    try {
+        // Ask the browser for low / interactive latency if supported
+        audioContext = new AC({ latencyHint: "interactive" });
+    } catch (e) {
+        // Fallback for older browsers
+        audioContext = new AC();
+    }
+}
+await audioContext.resume();
+
 
         localSource = audioContext.createMediaStreamSource(localStream);
 
