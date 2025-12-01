@@ -42,6 +42,7 @@ const metronomeVolumeSlider = document.getElementById("metronome-volume");
 
 const recordButton = document.getElementById("record");
 const recordingsContainer = document.getElementById("recordings");
+const takeLabelInput = document.getElementById("take-label");
 
 const remoteVolumeSlider = document.getElementById("remote-volume");
 const muteRemoteCheckbox = document.getElementById("mute-remote");
@@ -662,28 +663,54 @@ function startRecording() {
         alert("Audio graph not ready yet.");
         return;
     }
-    if (mediaRecorder && mediaRecorder.state === "recording") return;
+    if (mediaRecorder && mediaRecorder.state === "recording") {
+        return;
+    }
 
     recordedChunks = [];
     mediaRecorder = new MediaRecorder(recordDestination.stream);
+
     mediaRecorder.ondataavailable = (event) => {
         if (event.data && event.data.size > 0) {
             recordedChunks.push(event.data);
         }
     };
+
     mediaRecorder.onstop = () => {
         const blob = new Blob(recordedChunks, { type: "audio/webm" });
         const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
+
         const now = new Date();
-        const stamp = now.toISOString().replace(/[:.]/g, "-");
+        const datePart = now.toISOString().slice(0, 10); // YYYY-MM-DD
+        const timePart = now.toTimeString().slice(0, 5).replace(":", "-"); // HH-MM
+
+        const roomName = currentRoomId || "Untitled-room";
+        const bpmValue = parseInt(bpmInput.value, 10) || 120;
+        const label = (takeLabelInput && takeLabelInput.value.trim()) || "";
+
+        // Build a human-friendly title
+        let title = `${roomName} – ${bpmValue} BPM`;
+        if (label) {
+            title += ` – ${label}`;
+        }
+        title += ` – ${datePart} ${timePart}`;
+
+        const filenameSafe = title.replace(/[^\w\- ()]/g, "_");
+
+        const link = document.createElement("a");
         link.href = url;
-        link.download = `rehearsal-${stamp}.webm`;
-        link.textContent = "Download recording";
+        link.download = `${filenameSafe}.webm`;
+        link.textContent = title;
         link.style.display = "block";
 
+        // Clear previous recordings list and show this take
         recordingsContainer.innerHTML = "";
         recordingsContainer.appendChild(link);
+
+        // Optional: clear the label for the next take
+        if (takeLabelInput) {
+            takeLabelInput.value = "";
+        }
     };
 
     mediaRecorder.start();
@@ -831,4 +858,4 @@ updateRoomStatus();
 updateLatencyDisplay(null);
 updateLatencyStats();
 updateAudioStatus();
-// End of script.js
+// End of script.js 
