@@ -134,17 +134,50 @@ function renderRecordings() {
     div.appendChild(meta);
 
     if (rec.audioDataUrl) {
+      // Inline player
       const audio = document.createElement("audio");
       audio.controls = true;
       audio.src = rec.audioDataUrl;
       audio.style.display = "block";
       audio.style.marginTop = "4px";
       div.appendChild(audio);
+
+      // Overdub / backing button
+      const btn = document.createElement("button");
+      btn.textContent = "Use as backing track";
+      btn.className = "btn btn-secondary";
+      btn.style.marginTop = "6px";
+
+      btn.addEventListener("click", () => {
+        const backing = {
+          title: title.textContent,
+          audioDataUrl: rec.audioDataUrl,
+          bpm: rec.bpm || null,
+          roomId: rec.roomId || null,
+        };
+
+        // Send backing track to embedded app via postMessage
+        const frame = document.querySelector(".app-embed-frame");
+        if (frame && frame.contentWindow) {
+          frame.contentWindow.postMessage(
+            {
+              type: "rehearsal-space:set-backing",
+              backing,
+            },
+            "*"
+          );
+        } else {
+          alert("Could not find rehearsal room. Is the app loaded?");
+        }
+      });
+
+      div.appendChild(btn);
     }
 
     recordingsList.appendChild(div);
   });
 }
+
 
 function renderIdeas() {
   if (!ideasList) return;

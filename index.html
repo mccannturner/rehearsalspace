@@ -686,36 +686,51 @@
             </div>
 
             <!-- Recording -->
-            <div class="card-header">
+<div class="card card-recording">
+  <div class="card-header">
     <div class="card-title">
-        <span class="icon-title">
-            <!-- Recording icon -->
-            <svg width="18" height="18" viewBox="0 0 24 24"
-                 fill="none" stroke="#2C2C2E" stroke-width="1.75"
-                 stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="4" fill="#39393F"/>
-            </svg>
-            Recording
-        </span>
+      <span class="icon-title">
+        <!-- Recording icon -->
+        <svg width="18" height="18" viewBox="0 0 24 24"
+             fill="none" stroke="#2C2C2E" stroke-width="1.75"
+             stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="4" fill="#39393F"/>
+        </svg>
+        Recording
+      </span>
     </div>
-    <div class="card-subtitle">Capture rehearsal takes to review together</div>
-</div>
+    <div class="card-subtitle">Capture takes to review later</div>
+  </div>
 
-<div class="section-column" style="gap: 8px;">
+  <div class="section-column" style="gap: 8px;">
     <div class="section-row">
-        <button id="record">Start Recording</button>
-        <span class="small-label">Records your mix (mic + remote), not the metronome.</span>
+      <button id="record">Start Recording</button>
+      <span class="small-label">Records your mix (mic + remote/backing), not the metronome.</span>
     </div>
 
     <div class="section-row">
-        <label class="small-label">
-            Take label<br>
-            <input id="take-label" type="text" placeholder="e.g. Verse idea, Chorus transition" style="min-width: 220px;">
-        </label>
+      <div id="backing-status" class="small-label">
+        No backing track loaded.
+      </div>
     </div>
-</div>
 
-<div id="recordings"></div>
+    <div class="section-row">
+      <label class="small-label">
+        <input id="use-backing" type="checkbox">
+        Use backing track while recording (if available)
+      </label>
+    </div>
+
+    <div class="section-row">
+      <label class="small-label">
+        Take label<br>
+        <input id="take-label" type="text" placeholder="e.g. Verse idea, Chorus transition" style="min-width: 220px;">
+      </label>
+    </div>
+  </div>
+
+  <div id="recordings"></div>
+</div>
 
             <!-- Mixer -->
  <div class="card card-mixer">

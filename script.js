@@ -45,6 +45,9 @@ const recordButton = document.getElementById("record");
 const recordingsContainer = document.getElementById("recordings");
 const takeLabelInput = document.getElementById("take-label");
 
+const backingStatus = document.getElementById("backing-status");
+const useBackingCheckbox = document.getElementById("use-backing");
+
 const remoteVolumeSlider = document.getElementById("remote-volume");
 const muteRemoteCheckbox = document.getElementById("mute-remote");
 const userMixerContainer = document.getElementById("user-mixer");
@@ -75,6 +78,12 @@ const userGains = new Map();              // userId -> 0..1 per-user volume
 
 let mediaRecorder = null;
 let recordedChunks = [];
+
+// Backing track state
+let backingTrackConfig = null;      // { title, audioDataUrl, bpm, roomId }
+let backingAudioElement = null;
+let backingSourceNode = null;
+let backingConnected = false;
 
 // Metronome
 let metronomeTimer = null;
@@ -233,7 +242,6 @@ function updateLatencyStats() {
         `Jitter: ${jitter.toFixed(1)} ms (${latencySamples.length} samples)`;
 }
 
-// ========= BAND WORKSPACE METADATA (local-only) =========
 const BAND_WORKSPACE_KEY = "rehearsalSpaceBandWorkspace";
 
 function saveRecordingMetadataToWorkspace(roomName, bpmValue, label, timestampMs, audioDataUrl) {
@@ -333,6 +341,35 @@ function applyVolumes() {
         audio.volume = master * gain;
     });
 }
+
+function updateBackingUI() {
+    if (!backingStatus) return;
+
+    if (!backingTrackConfig) {
+        backingStatus.textContent = "No backing track loaded.";
+        if (useBackingCheckbox) useBackingCheckbox.checked = false;
+    } else {
+        backingStatus.textContent =
+            "Backing loaded: " + (backingTrackConfig.title || "Untitled recording");
+        if (useBackingCheckbox && !useBackingCheckbox.checked) {
+            useBackingCheckbox.checked = true;
+        }
+    }
+}
+
+// Receive backing track from Band Workspace (iframe parent)
+window.addEventListener("message", (event) => {
+    const msg = event.data;
+    if (!msg || msg.type !== "rehearsal-space:set-backing") return;
+
+    backingTrackConfig = msg.backing || null;
+    backingAudioElement = null;
+    backingSourceNode = null;
+    backingConnected = false;
+
+    console.log("Received backing track config:", backingTrackConfig);
+    updateBackingUI();
+});
 
 // ========= SOCKET HANDLING =========
 function ensureSocket() {
@@ -779,9 +816,7 @@ function startRecording() {
         alert("Audio graph not ready yet.");
         return;
     }
-    if (mediaRecorder && mediaRecorder.state === "recording") {
-        return;
-    }
+    if (mediaRecorder && mediaRecorder.state === "recording") return;
 
     recordedChunks = [];
     mediaRecorder = new MediaRecorder(recordDestination.stream);
@@ -793,47 +828,87 @@ function startRecording() {
     };
 
     mediaRecorder.onstop = () => {
-    const blob = new Blob(recordedChunks, { type: "audio/webm" });
-    const url = URL.createObjectURL(blob);
+        const blob = new Blob(recordedChunks, { type: "audio/webm" });
+        const url = URL.createObjectURL(blob);
 
-    const now = new Date();
-    const datePart = now.toISOString().slice(0, 10); // YYYY-MM-DD
-    const timePart = now.toTimeString().slice(0, 5).replace(":", "-"); // HH-MM
+        const now = new Date();
+        const datePart = now.toISOString().slice(0, 10); // YYYY-MM-DD
+        const timePart = now.toTimeString().slice(0, 5).replace(":", "-"); // HH-MM
 
-    const roomName = currentRoomId || "Untitled-room";
-    const bpmValue = parseInt(bpmInput.value, 10) || 120;
-    const label = (takeLabelInput && takeLabelInput.value.trim()) || "";
+        const roomName = currentRoomId || "Untitled-room";
+        const bpmValue = parseInt(bpmInput.value, 10) || 120;
+        const label = (takeLabelInput && takeLabelInput.value.trim()) || "";
 
-    // Build a human-friendly title
-    let title = `${roomName} – ${bpmValue} BPM`;
-    if (label) {
-        title += ` – ${label}`;
-    }
-    title += ` – ${datePart} ${timePart}`;
+        let title = `${roomName} – ${bpmValue} BPM`;
+        if (label) {
+            title += ` – ${label}`;
+        }
+        title += ` – ${datePart} ${timePart}`;
 
-    const filenameSafe = title.replace(/[^\w\- ()]/g, "_");
+        const filenameSafe = title.replace(/[^\w\- ()]/g, "_");
 
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${filenameSafe}.webm`;
-    link.textContent = title;
-    link.style.display = "block";
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `${filenameSafe}.webm`;
+        link.textContent = title;
+        link.style.display = "block";
 
-    recordingsContainer.innerHTML = "";
-    recordingsContainer.appendChild(link);
+        recordingsContainer.innerHTML = "";
+        recordingsContainer.appendChild(link);
 
-    if (takeLabelInput) {
-        takeLabelInput.value = "";
-    }
+        if (takeLabelInput) {
+            takeLabelInput.value = "";
+        }
 
-    // Save metadata + audio to Band Workspace (local-only)
-    const reader = new FileReader();
-    reader.onloadend = () => {
-        const audioDataUrl = reader.result; // "data:audio/webm;base64,..."
-        saveRecordingMetadataToWorkspace(roomName, bpmValue, label, now.getTime(), audioDataUrl);
+        // Save metadata + audio to Band Workspace
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            const audioDataUrl = reader.result;
+            saveRecordingMetadataToWorkspace(roomName, bpmValue, label, now.getTime(), audioDataUrl);
+        };
+        reader.readAsDataURL(blob);
     };
-    reader.readAsDataURL(blob);
-};
+
+    // ==== Backing track: play & route into recording ====
+    if (
+        backingTrackConfig &&
+        backingTrackConfig.audioDataUrl &&
+        useBackingCheckbox &&
+        useBackingCheckbox.checked
+    ) {
+        if (!audioContext) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            audioContext.resume();
+        }
+
+        if (!backingAudioElement) {
+            backingAudioElement = new Audio();
+            backingAudioElement.src = backingTrackConfig.audioDataUrl;
+            backingAudioElement.preload = "auto";
+        } else {
+            backingAudioElement.currentTime = 0;
+        }
+
+        if (audioContext && recordDestination && !backingConnected) {
+            try {
+                backingSourceNode = audioContext.createMediaElementSource(backingAudioElement);
+                backingSourceNode.connect(audioContext.destination);
+                backingSourceNode.connect(recordDestination);
+                backingConnected = true;
+            } catch (e) {
+                console.warn("Could not connect backing track source (maybe already connected):", e);
+                backingConnected = true;
+            }
+        }
+
+        const playPromise = backingAudioElement.play();
+        if (playPromise && playPromise.catch) {
+            playPromise.catch((err) => {
+                console.warn("Backing track playback failed:", err);
+            });
+        }
+    }
+    // ================================================
 
     mediaRecorder.start();
     recordButton.textContent = "Stop Recording";
@@ -843,6 +918,10 @@ function stopRecording() {
     if (mediaRecorder && mediaRecorder.state === "recording") {
         mediaRecorder.stop();
         recordButton.textContent = "Start Recording";
+    }
+
+    if (backingAudioElement && !backingAudioElement.paused) {
+        backingAudioElement.pause();
     }
 }
 
