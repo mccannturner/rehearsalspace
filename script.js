@@ -46,6 +46,7 @@ const takeLabelInput = document.getElementById("take-label");
 
 const remoteVolumeSlider = document.getElementById("remote-volume");
 const muteRemoteCheckbox = document.getElementById("mute-remote");
+const userMixerContainer = document.getElementById("user-mixer");
 
 // ========= SIGNALING / ROOM STATE =========
 const serverUrl =
@@ -67,8 +68,9 @@ let localSource = null;
 let recordDestination = null;
 
 const peerConnections = new Map();        // userId -> RTCPeerConnection
-const remoteGains = new Map();            // userId -> GainNode
+const remoteGains = new Map();            // userId -> GainNode (unused in simple mode)
 const remoteAudioElements = new Map();    // userId -> <audio>
+const userGains = new Map();              // userId -> 0..1 per-user volume
 
 let mediaRecorder = null;
 let recordedChunks = [];
@@ -122,6 +124,52 @@ function updateUserList() {
             li.textContent = `Bandmate ${bandmateNumber++}`;
         }
         userList.appendChild(li);
+    });
+}
+
+function updateUserList() {
+    userList.innerHTML = "";
+    usersInRoom.forEach((uid) => {
+        const li = document.createElement("li");
+        li.textContent = uid === myUserId ? `${uid} (you)` : uid;
+        userList.appendChild(li);
+    });
+
+    updateUserMixerUI();
+}
+
+function updateUserMixerUI() {
+    if (!userMixerContainer) return;
+
+    userMixerContainer.innerHTML = "";
+
+    usersInRoom.forEach((uid) => {
+        if (uid === myUserId) return; // don’t mix yourself here
+
+        const row = document.createElement("div");
+        row.className = "slider-row";
+
+        const label = document.createElement("label");
+        label.className = "small-label";
+        label.textContent = uid;
+
+        const slider = document.createElement("input");
+        slider.type = "range";
+        slider.min = "0";
+        slider.max = "100";
+
+        const gain = userGains.has(uid) ? userGains.get(uid) : 1;
+        slider.value = Math.round(gain * 100);
+
+        slider.addEventListener("input", () => {
+            const value = parseInt(slider.value, 10) || 0;
+            userGains.set(uid, value / 100);
+            applyVolumes();
+        });
+
+        row.appendChild(label);
+        row.appendChild(slider);
+        userMixerContainer.appendChild(row);
     });
 }
 
@@ -236,6 +284,17 @@ function updateAudioStatus() {
     audioStatusPill.style.backgroundColor = pillBg;
     audioStatusDot.style.backgroundColor = dotColor;
     audioStatusText.textContent = text;
+}
+
+function applyVolumes() {
+    if (!remoteVolumeSlider || !muteRemoteCheckbox) return;
+
+    const master = muteRemoteCheckbox.checked ? 0 : (remoteVolumeSlider.value / 100);
+
+    remoteAudioElements.forEach((audio, userId) => {
+        const gain = userGains.has(userId) ? userGains.get(userId) : 1;
+        audio.volume = master * gain;
+    });
 }
 
 // ========= SOCKET HANDLING =========
@@ -509,7 +568,6 @@ async function handleSignalMessage(msg) {
 }
 
 function handleRemoteStream(userId, stream) {
-    // Minimal, robust remote playback: HTMLAudioElement only.
     try {
         const audio = document.createElement("audio");
         audio.srcObject = stream;
@@ -517,21 +575,19 @@ function handleRemoteStream(userId, stream) {
         audio.playsInline = true;
         audio.muted = false;
 
-        const baseVolume = muteRemoteCheckbox.checked
-            ? 0
-            : (remoteVolumeSlider.value / 100);
-
-        audio.volume = baseVolume;
         audio.style.display = "none";
 
         document.body.appendChild(audio);
         remoteAudioElements.set(userId, audio);
 
-        updateAudioStatus();
-        
         console.log("Created HTMLAudioElement for remote user (simple mode):", userId);
 
-        // Explicitly try to start playback and log if it fails
+        if (!userGains.has(userId)) {
+            userGains.set(userId, 1);
+        }
+        applyVolumes();
+        updateUserMixerUI();
+
         const playPromise = audio.play();
         if (playPromise !== undefined) {
             playPromise
@@ -574,6 +630,8 @@ function teardownPeer(userId) {
         remoteAudioElements.delete(userId);
     }
     updateAudioStatus();
+    userGains.delete(userId);
+    updateUserMixerUI();
 }
 
 // ========= CHAT =========
@@ -801,19 +859,11 @@ recordButton.addEventListener("click", () => {
 });
 
 remoteVolumeSlider.addEventListener("input", () => {
-    const value = muteRemoteCheckbox.checked ? 0 : (remoteVolumeSlider.value / 100);
-
-    remoteAudioElements.forEach((audio) => {
-        audio.volume = value;
-    });
+    applyVolumes();
 });
 
 muteRemoteCheckbox.addEventListener("change", () => {
-    const value = muteRemoteCheckbox.checked ? 0 : (remoteVolumeSlider.value / 100);
-
-    remoteAudioElements.forEach((audio) => {
-        audio.volume = value;
-    });
+    applyVolumes();
 });
 
 if (inviteCopyButton) {
