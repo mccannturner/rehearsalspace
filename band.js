@@ -132,6 +132,16 @@ function renderRecordings() {
 
     div.appendChild(title);
     div.appendChild(meta);
+
+    if (rec.audioDataUrl) {
+      const audio = document.createElement("audio");
+      audio.controls = true;
+      audio.src = rec.audioDataUrl;
+      audio.style.display = "block";
+      audio.style.marginTop = "4px";
+      div.appendChild(audio);
+    }
+
     recordingsList.appendChild(div);
   });
 }

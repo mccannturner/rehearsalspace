@@ -233,7 +233,7 @@ function updateLatencyStats() {
 // ========= BAND WORKSPACE METADATA (local-only) =========
 const BAND_WORKSPACE_KEY = "rehearsalSpaceBandWorkspace";
 
-function saveRecordingMetadataToWorkspace(roomName, bpmValue, label, timestampMs) {
+function saveRecordingMetadataToWorkspace(roomName, bpmValue, label, timestampMs, audioDataUrl) {
     try {
         const raw = localStorage.getItem(BAND_WORKSPACE_KEY);
         let data;
@@ -254,7 +254,8 @@ function saveRecordingMetadataToWorkspace(roomName, bpmValue, label, timestampMs
             roomId: roomName || "Untitled room",
             bpm: bpmValue || null,
             label: label || "",
-            timestamp: timestampMs || Date.now()
+            timestamp: timestampMs || Date.now(),
+            audioDataUrl: audioDataUrl || null
         });
 
         localStorage.setItem(BAND_WORKSPACE_KEY, JSON.stringify(data));
@@ -445,29 +446,28 @@ async function getLocalStream() {
     if (localStream) return localStream;
 
     try {
-        localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        localStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+                echoCancellation: false,
+                noiseSuppression: false,
+                autoGainControl: false
+            },
+            video: false
+        });
         console.log("🎙️ Microphone access granted");
 
         if (!audioContext) {
-    const AC = window.AudioContext || window.webkitAudioContext;
-    try {
-        // Ask the browser for low / interactive latency if supported
-        audioContext = new AC({ latencyHint: "interactive" });
-    } catch (e) {
-        // Fallback for older browsers
-        audioContext = new AC();
-    }
-}
-await audioContext.resume();
-
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        await audioContext.resume();
 
         localSource = audioContext.createMediaStreamSource(localStream);
 
-        // Only route mic into the recording destination for local recording.
+        // We removed mic self-monitoring (no more delayed "my mic monitor"),
+        // so we ONLY route the mic into the recording destination.
         recordDestination = audioContext.createMediaStreamDestination();
         localSource.connect(recordDestination);
 
-        updateAudioStatus();
         return localStream;
     } catch (err) {
         console.error("Microphone access failed:", err);
@@ -794,17 +794,20 @@ function startRecording() {
     link.textContent = title;
     link.style.display = "block";
 
-    // Clear previous recordings list and show this take
     recordingsContainer.innerHTML = "";
     recordingsContainer.appendChild(link);
 
-    // Optional: clear the label for the next take
     if (takeLabelInput) {
         takeLabelInput.value = "";
     }
 
-    // Save metadata to Band Workspace (local-only)
-    saveRecordingMetadataToWorkspace(roomName, bpmValue, label, now.getTime());
+    // Save metadata + audio to Band Workspace (local-only)
+    const reader = new FileReader();
+    reader.onloadend = () => {
+        const audioDataUrl = reader.result; // "data:audio/webm;base64,..."
+        saveRecordingMetadataToWorkspace(roomName, bpmValue, label, now.getTime(), audioDataUrl);
+    };
+    reader.readAsDataURL(blob);
 };
 
     mediaRecorder.start();
