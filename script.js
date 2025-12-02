@@ -39,6 +39,7 @@ const metronomeButton = document.getElementById("metronome");
 const shareMetronomeCheckbox = document.getElementById("share-metronome");
 const beatIndicator = document.getElementById("beat-indicator");
 const metronomeVolumeSlider = document.getElementById("metronome-volume");
+const timeSignatureSelect = document.getElementById("time-signature");
 
 const recordButton = document.getElementById("record");
 const recordingsContainer = document.getElementById("recordings");
@@ -80,6 +81,8 @@ let metronomeTimer = null;
 let metronomeRunning = false;
 let metronomeIsShared = false;
 let metronomeBpm = 120;
+let metronomeBeatsPerBar = 4;
+let metronomeCurrentBeat = 0;
 
 // ========= HELPERS =========
 function createRandomUserId() {
@@ -700,27 +703,41 @@ function metronomeTick() {
     if (!audioContext) return;
     const vol = metronomeVolumeSlider.value / 100;
 
+    // Advance beat in bar
+    if (!metronomeBeatsPerBar || metronomeBeatsPerBar < 1) {
+        metronomeBeatsPerBar = 4;
+    }
+    metronomeCurrentBeat = (metronomeCurrentBeat % metronomeBeatsPerBar) + 1;
+    const isDownbeat = (metronomeCurrentBeat === 1);
+
     const osc = audioContext.createOscillator();
     const gain = audioContext.createGain();
-    gain.gain.value = vol;
 
-    osc.frequency.value = 1000;
+    // Slightly louder + higher pitch on beat 1
+    gain.gain.value = vol * (isDownbeat ? 1.0 : 0.7);
+    osc.frequency.value = isDownbeat ? 1500 : 1000;
+
     osc.connect(gain);
     gain.connect(audioContext.destination);
 
     osc.start();
     osc.stop(audioContext.currentTime + 0.05);
 
-    beatIndicator.style.backgroundColor = "#39393F";
+    // Visual accent: darker dot on beat 1, lighter on others
+    beatIndicator.style.backgroundColor = isDownbeat ? "#39393F" : "#B0B0B8";
     setTimeout(() => {
         beatIndicator.style.backgroundColor = "transparent";
     }, 80);
 }
 
-function startLocalMetronome(bpm) {
+function startLocalMetronome(bpm, beatsPerBar) {
     stopLocalMetronome();
+
     metronomeRunning = true;
     metronomeBpm = bpm;
+    metronomeBeatsPerBar = beatsPerBar || 4;
+    metronomeCurrentBeat = 0; // reset bar
+
     const intervalMs = 60000 / bpm;
     metronomeTimer = setInterval(metronomeTick, intervalMs);
     metronomeButton.textContent = "Stop Metronome";
@@ -733,16 +750,24 @@ function stopLocalMetronome() {
         metronomeTimer = null;
     }
     metronomeButton.textContent = "Start Metronome";
+    metronomeCurrentBeat = 0;
     beatIndicator.style.backgroundColor = "transparent";
 }
 
 function handleRemoteMetronome(msg) {
-    const { running, bpm } = msg;
+    const { running, bpm, timeSignature } = msg;
     if (!shareMetronomeCheckbox.checked) {
         return;
     }
+    const beatsPerBar = parseInt(timeSignature, 10) || 4;
+
+    // Update UI selector to match incoming time signature
+    if (timeSignatureSelect) {
+        timeSignatureSelect.value = String(beatsPerBar);
+    }
+
     if (running) {
-        startLocalMetronome(bpm);
+        startLocalMetronome(bpm, beatsPerBar);
     } else {
         stopLocalMetronome();
     }
@@ -859,6 +884,8 @@ chatInput.addEventListener("keydown", (e) => {
 
 metronomeButton.addEventListener("click", () => {
     const bpm = parseInt(bpmInput.value, 10) || 120;
+    const beatsPerBar = parseInt(timeSignatureSelect && timeSignatureSelect.value, 10) || 4;
+
     if (!audioContext) {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
         audioContext.resume();
@@ -872,17 +899,19 @@ metronomeButton.addEventListener("click", () => {
                 roomId: currentRoomId,
                 running: false,
                 bpm,
+                timeSignature: beatsPerBar,
                 startTime: Date.now()
             }));
         }
     } else {
-        startLocalMetronome(bpm);
+        startLocalMetronome(bpm, beatsPerBar);
         if (socket && socket.readyState === WebSocket.OPEN && currentRoomId && shareMetronomeCheckbox.checked) {
             socket.send(JSON.stringify({
                 type: "metronome",
                 roomId: currentRoomId,
                 running: true,
                 bpm,
+                timeSignature: beatsPerBar,
                 startTime: Date.now()
             }));
         }
