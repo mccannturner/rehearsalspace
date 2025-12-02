@@ -230,6 +230,39 @@ function updateLatencyStats() {
         `Jitter: ${jitter.toFixed(1)} ms (${latencySamples.length} samples)`;
 }
 
+// ========= BAND WORKSPACE METADATA (local-only) =========
+const BAND_WORKSPACE_KEY = "rehearsalSpaceBandWorkspace";
+
+function saveRecordingMetadataToWorkspace(roomName, bpmValue, label, timestampMs) {
+    try {
+        const raw = localStorage.getItem(BAND_WORKSPACE_KEY);
+        let data;
+        if (!raw) {
+            data = {
+                bandName: "",
+                recordings: [],
+                ideas: []
+            };
+        } else {
+            data = JSON.parse(raw);
+            if (!data.recordings) data.recordings = [];
+            if (!data.ideas) data.ideas = [];
+            if (typeof data.bandName !== "string") data.bandName = "";
+        }
+
+        data.recordings.push({
+            roomId: roomName || "Untitled room",
+            bpm: bpmValue || null,
+            label: label || "",
+            timestamp: timestampMs || Date.now()
+        });
+
+        localStorage.setItem(BAND_WORKSPACE_KEY, JSON.stringify(data));
+    } catch (e) {
+        console.warn("Failed to save recording metadata to Band Workspace", e);
+    }
+}
+
 function updateInviteLink() {
     if (!inviteLinkInput || !inviteCopyButton || !inviteCopiedLabel) return;
 
@@ -735,41 +768,44 @@ function startRecording() {
     };
 
     mediaRecorder.onstop = () => {
-        const blob = new Blob(recordedChunks, { type: "audio/webm" });
-        const url = URL.createObjectURL(blob);
+    const blob = new Blob(recordedChunks, { type: "audio/webm" });
+    const url = URL.createObjectURL(blob);
 
-        const now = new Date();
-        const datePart = now.toISOString().slice(0, 10); // YYYY-MM-DD
-        const timePart = now.toTimeString().slice(0, 5).replace(":", "-"); // HH-MM
+    const now = new Date();
+    const datePart = now.toISOString().slice(0, 10); // YYYY-MM-DD
+    const timePart = now.toTimeString().slice(0, 5).replace(":", "-"); // HH-MM
 
-        const roomName = currentRoomId || "Untitled-room";
-        const bpmValue = parseInt(bpmInput.value, 10) || 120;
-        const label = (takeLabelInput && takeLabelInput.value.trim()) || "";
+    const roomName = currentRoomId || "Untitled-room";
+    const bpmValue = parseInt(bpmInput.value, 10) || 120;
+    const label = (takeLabelInput && takeLabelInput.value.trim()) || "";
 
-        // Build a human-friendly title
-        let title = `${roomName} – ${bpmValue} BPM`;
-        if (label) {
-            title += ` – ${label}`;
-        }
-        title += ` – ${datePart} ${timePart}`;
+    // Build a human-friendly title
+    let title = `${roomName} – ${bpmValue} BPM`;
+    if (label) {
+        title += ` – ${label}`;
+    }
+    title += ` – ${datePart} ${timePart}`;
 
-        const filenameSafe = title.replace(/[^\w\- ()]/g, "_");
+    const filenameSafe = title.replace(/[^\w\- ()]/g, "_");
 
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `${filenameSafe}.webm`;
-        link.textContent = title;
-        link.style.display = "block";
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${filenameSafe}.webm`;
+    link.textContent = title;
+    link.style.display = "block";
 
-        // Clear previous recordings list and show this take
-        recordingsContainer.innerHTML = "";
-        recordingsContainer.appendChild(link);
+    // Clear previous recordings list and show this take
+    recordingsContainer.innerHTML = "";
+    recordingsContainer.appendChild(link);
 
-        // Optional: clear the label for the next take
-        if (takeLabelInput) {
-            takeLabelInput.value = "";
-        }
-    };
+    // Optional: clear the label for the next take
+    if (takeLabelInput) {
+        takeLabelInput.value = "";
+    }
+
+    // Save metadata to Band Workspace (local-only)
+    saveRecordingMetadataToWorkspace(roomName, bpmValue, label, now.getTime());
+};
 
     mediaRecorder.start();
     recordButton.textContent = "Stop Recording";

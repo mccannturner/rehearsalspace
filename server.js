@@ -17,6 +17,11 @@ app.get("/app", (req, res) => {
     res.sendFile(path.join(__dirname, "index.html"));
 });
 
+// Band Workspace
+app.get("/band", (req, res) => {
+    res.sendFile(path.join(__dirname, "band.html"));
+});
+
 // Optional: favicon route
 app.get("/favicon.ico", (req, res) => {
     res.sendFile(path.join(__dirname, "assets", "rehearsal-space-1024.png"));
