@@ -790,6 +790,7 @@ function handleRemoteStream(userId, stream) {
                     console.warn("Remote audio play was blocked or failed:", err);
                 });
         }
+        updateAudioStatus();
     } catch (e) {
         console.warn("Could not create HTMLAudioElement for remote stream", e);
     }
@@ -929,7 +930,121 @@ function handleRemoteMetronome(msg) {
     }
 }
 
+// ========= RECORDING STATE HELPERS =========
+
+// UI for different recording phases
+function setRecordingUIIdle() {
+    if (recordButton) {
+        recordButton.disabled = false;
+        recordButton.textContent = "Start Recording";
+    }
+}
+
+function setRecordingUIRecording(recId) {
+    if (!recordButton) return;
+
+    const isMe = (recId === myUserId);
+    recordButton.disabled = !isMe;
+    recordButton.textContent = isMe ? "Stop Recording" : "Recording…";
+}
+
+function setRecordingUISaving() {
+    if (!recordButton) return;
+    recordButton.disabled = true;
+    recordButton.textContent = "Saving…";
+}
+
+// For now we won't really use COUNT_IN, but we support it.
+function setRecordingUICountIn(recId) {
+    if (!recordButton) return;
+
+    const isMe = (recId === myUserId);
+    recordButton.disabled = !isMe;
+    recordButton.textContent = isMe ? "Recording will start…" : "Preparing to record…";
+}
+
+// Lock/unlock mixer controls while recording
+function lockMixerSliders() {
+    if (remoteVolumeSlider) remoteVolumeSlider.disabled = true;
+    if (muteRemoteCheckbox) muteRemoteCheckbox.disabled = true;
+
+    if (userMixerContainer) {
+        Array.from(userMixerContainer.querySelectorAll('input[type="range"]'))
+            .forEach(slider => slider.disabled = true);
+    }
+}
+
+function unlockMixerSliders() {
+    if (remoteVolumeSlider) remoteVolumeSlider.disabled = false;
+    if (muteRemoteCheckbox) muteRemoteCheckbox.disabled = false;
+
+    if (userMixerContainer) {
+        Array.from(userMixerContainer.querySelectorAll('input[type="range"]'))
+            .forEach(slider => slider.disabled = false);
+    }
+}
+
+// Central state setter used by recording + future features
+function setSessionState(nextState, options = {}) {
+    sessionState = nextState;
+
+    // recorderId is "who owns" the current recording session
+    if (options.recorderId) {
+        recorderId = options.recorderId;
+    } else if (!recorderId) {
+        recorderId = myUserId;
+    }
+
+    switch (nextState) {
+        case SessionState.IDLE:
+            recorderId = null;
+            setRecordingUIIdle();
+            unlockMixerSliders();
+            break;
+
+        case SessionState.COUNT_IN:
+            setRecordingUICountIn(recorderId);
+            lockMixerSliders();
+            break;
+
+        case SessionState.RECORDING:
+            setRecordingUIRecording(recorderId);
+            lockMixerSliders();
+            break;
+
+        case SessionState.SAVING:
+            setRecordingUISaving();
+            lockMixerSliders();
+            break;
+    }
+}
+
 // ========= RECORDING =========
+async function beginRecordFlow() {
+    try {
+        // Make sure audio graph + mic are ready
+        await getLocalStream();
+
+        // If you want a real count-in later, you can:
+        // setSessionState(SessionState.COUNT_IN, { recorderId: myUserId });
+        // and start recording after a timeout or a few metronome ticks.
+        // For now, we go straight to recording:
+        startRecording();
+        // NOTE: startRecording should call setSessionState(SessionState.RECORDING, { recorderId: myUserId })
+        // once MediaRecorder is started.
+    } catch (e) {
+        console.error("Could not start recording:", e);
+        setSessionState(SessionState.IDLE);
+    }
+}
+
+function stopRecordingFlow() {
+    // Show "Saving…" and lock mixer
+    setSessionState(SessionState.SAVING, { recorderId: myUserId });
+    // This will trigger mediaRecorder.onstop → handleRecordingFinished()
+    stopRecording();
+}
+
 function startRecording() {
     if (!recordDestination) {
         alert("Audio graph not ready yet.");
@@ -1046,6 +1161,7 @@ function handleRecordingFinished() {
             saveRecordingMetadataToWorkspace(roomName, bpmValue, label, now.getTime(), audioDataUrl);
         };
         reader.readAsDataURL(blob);
+        setSessionState(SessionState.IDLE);
     };
 
 // ========= UI EVENT HANDLERS =========
@@ -1121,17 +1237,15 @@ metronomeButton.addEventListener("click", () => {
 });
 
 recordButton.addEventListener("click", () => {
-  if (sessionState === SessionState.IDLE) {
-    // I want to start recording
-    beginRecordFlow();
-  } else if (sessionState === SessionState.COUNT_IN || sessionState === SessionState.RECORDING) {
-    // Only the recorder can stop
-    if (recorderId === myUserId) {
-      stopRecordingFlow();
-    } else {
-      // ignore or show "Jake is recording" message
+    if (sessionState === SessionState.IDLE) {
+        // Start a new recording
+        beginRecordFlow();
+    } else if (sessionState === SessionState.RECORDING || sessionState === SessionState.SAVING) {
+        // Only the current recorder can stop
+        if (recorderId === myUserId) {
+            stopRecordingFlow();
+        }
     }
-  }
 });
 
 // ========= TABS =========
