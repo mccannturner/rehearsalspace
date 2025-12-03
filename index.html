@@ -669,12 +669,13 @@
   </div>
 
   <!-- Tab bar -->
-  <div id="tab-bar">
-    <button type="button" data-tab-target="chat" class="active">Chat</button>
-    <button type="button" data-tab-target="band">Band</button>
-    <button type="button" data-tab-target="mixer">Mixer</button>
-    <button type="button" data-tab-target="metronome">Metronome</button>
-  </div>
+<div id="tab-bar">
+  <button type="button" data-tab-target="chat" class="active">Chat</button>
+  <button type="button" data-tab-target="band">Band</button>
+  <button type="button" data-tab-target="mixer">Mixer</button>
+  <button type="button" data-tab-target="recordings">Recordings</button>
+  <button type="button" data-tab-target="metronome">Metronome</button>
+</div>
 
   <!-- Tab panels -->
   <div id="tab-panels">
@@ -795,6 +796,36 @@
       <div style="margin-top: 10px;">
         <div class="small-label">Band mix (per user):</div>
         <div id="user-mixer" class="section-column" style="gap: 6px; margin-top: 4px;"></div>
+      </div>
+    </div>
+
+    <!-- RECORDINGS TAB -->
+    <div class="tab-panel" data-tab="recordings">
+      <div class="card-header">
+        <div class="card-title">
+          <span class="icon-title">
+            <!-- Recordings icon -->
+            <svg width="18" height="18" viewBox="0 0 24 24"
+                 fill="none" stroke="#2C2C2E" stroke-width="1.75"
+                 stroke-linecap="round" stroke-linejoin="round">
+              <rect x="4" y="4" width="16" height="16" rx="3"/>
+              <circle cx="12" cy="12" r="3" fill="#39393F"/>
+              <circle cx="18" cy="8" r="1"/>
+            </svg>
+            Recordings
+          </span>
+        </div>
+        <div class="card-subtitle">Previous takes saved on this device</div>
+      </div>
+
+      <div class="section-column" style="gap: 8px;">
+        <div class="small-label">
+          These recordings live in your browser only (per device). Use them as backing tracks or for quick reference.
+        </div>
+
+        <div id="recordings-list" class="section-column" style="gap: 8px; margin-top: 6px;">
+          <!-- Filled by script.js -->
+        </div>
       </div>
     </div>
 

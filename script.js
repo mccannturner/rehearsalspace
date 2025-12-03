@@ -52,6 +52,8 @@ const remoteVolumeSlider = document.getElementById("remote-volume");
 const muteRemoteCheckbox = document.getElementById("mute-remote");
 const userMixerContainer = document.getElementById("user-mixer");
 
+const recordingsListContainer = document.getElementById("recordings-list");
+
 // ========= SIGNALING / ROOM STATE =========
 const serverUrl =
     (window.location.protocol === "https:" ? "wss://" : "ws://") +
@@ -284,6 +286,141 @@ function saveRecordingMetadataToWorkspace(roomName, bpmValue, label, timestampMs
     } catch (e) {
         console.warn("Failed to save recording metadata to Band Workspace", e);
     }
+}
+
+function loadBandWorkspaceRecordings() {
+    if (!recordingsListContainer) return;
+
+    recordingsListContainer.innerHTML = "";
+
+    let data;
+    try {
+        const raw = localStorage.getItem(BAND_WORKSPACE_KEY);
+        if (!raw) {
+            const empty = document.createElement("div");
+            empty.className = "small-label";
+            empty.textContent = "No recordings saved yet. Record something to see it here.";
+            recordingsListContainer.appendChild(empty);
+            return;
+        }
+        data = JSON.parse(raw);
+    } catch (e) {
+        console.warn("Failed to read BAND_WORKSPACE_KEY from localStorage:", e);
+        const error = document.createElement("div");
+        error.className = "small-label";
+        error.textContent = "Could not load recordings.";
+        recordingsListContainer.appendChild(error);
+        return;
+    }
+
+    const recordings = Array.isArray(data.recordings) ? data.recordings : [];
+    if (!recordings.length) {
+        const empty = document.createElement("div");
+        empty.className = "small-label";
+        empty.textContent = "No recordings saved yet. Record something to see it here.";
+        recordingsListContainer.appendChild(empty);
+        return;
+    }
+
+    // Newest first
+    recordings.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+    recordings.forEach((rec, index) => {
+        const row = document.createElement("div");
+        row.className = "section-row";
+        row.style.justifyContent = "space-between";
+        row.style.alignItems = "center";
+        row.style.flexWrap = "wrap";
+
+        const info = document.createElement("div");
+        info.style.display = "flex";
+        info.style.flexDirection = "column";
+
+        const title = document.createElement("div");
+        title.style.fontSize = "13px";
+        title.style.fontWeight = "500";
+
+        const label = rec.label && rec.label.trim() ? rec.label.trim() : `Take ${recordings.length - index}`;
+        title.textContent = label;
+
+        const meta = document.createElement("div");
+        meta.className = "small-label";
+
+        const roomName = rec.roomId || "Unknown room";
+        const bpm = rec.bpm ? `${rec.bpm} BPM` : "BPM unknown";
+
+        const date = rec.timestamp ? new Date(rec.timestamp) : null;
+        const dateStr = date
+            ? date.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+            : "Time unknown";
+
+        meta.textContent = `${roomName} • ${bpm} • ${dateStr}`;
+
+        info.appendChild(title);
+        info.appendChild(meta);
+
+        const actions = document.createElement("div");
+        actions.style.display = "flex";
+        actions.style.gap = "6px";
+        actions.style.marginTop = "4px";
+
+        // Play button
+        const playBtn = document.createElement("button");
+        playBtn.type = "button";
+        playBtn.className = "secondary";
+        playBtn.textContent = "Play";
+
+        playBtn.addEventListener("click", () => {
+            if (!rec.audioDataUrl) {
+                alert("This recording has no audio data stored.");
+                return;
+            }
+            try {
+                const audio = new Audio(rec.audioDataUrl);
+                audio.play().catch((err) => {
+                    console.warn("Playback failed:", err);
+                });
+            } catch (e) {
+                console.warn("Could not play recording:", e);
+            }
+        });
+
+        // Use as backing button
+        const useBtn = document.createElement("button");
+        useBtn.type = "button";
+        useBtn.textContent = "Use as backing";
+
+        useBtn.addEventListener("click", () => {
+            if (!rec.audioDataUrl) {
+                alert("This recording has no audio data stored.");
+                return;
+            }
+
+            backingTrackConfig = {
+                title: label,
+                audioDataUrl: rec.audioDataUrl,
+                bpm: rec.bpm || null,
+                roomId: rec.roomId || null
+            };
+
+            console.log("Backing track set from recordings tab:", backingTrackConfig);
+            updateBackingUI();
+
+            // Optional: scroll to the Recording card so user sees the backing status change
+            const recordingCard = document.querySelector(".card-recording");
+            if (recordingCard) {
+                recordingCard.scrollIntoView({ behavior: "smooth", block: "start" });
+            }
+        });
+
+        actions.appendChild(playBtn);
+        actions.appendChild(useBtn);
+
+        row.appendChild(info);
+        row.appendChild(actions);
+
+        recordingsListContainer.appendChild(row);
+    });
 }
 
 function updateInviteLink() {
@@ -1353,6 +1490,11 @@ tabButtons.forEach((btn) => {
             const panelTab = panel.getAttribute("data-tab");
             panel.classList.toggle("active", panelTab === target);
         });
+
+        // If we switched to the Recordings tab, refresh the list
+        if (target === "recordings") {
+            loadBandWorkspaceRecordings();
+        }
     });
 });
 
@@ -1464,4 +1606,6 @@ updateRoomStatus();
 updateLatencyDisplay(null);
 updateLatencyStats();
 updateAudioStatus();
-// End of script.js 
+
+// Preload recordings list once (so it's ready the first time user clicks the tab)
+loadBandWorkspaceRecordings();
