@@ -257,22 +257,52 @@ function updateLatencyStats() {
 
 const BAND_WORKSPACE_KEY = "rehearsalSpaceBandWorkspace";
 
-function saveRecordingMetadataToWorkspace(roomName, bpmValue, label, timestampMs, audioDataUrl) {
+function getBandWorkspace() {
     try {
         const raw = localStorage.getItem(BAND_WORKSPACE_KEY);
-        let data;
         if (!raw) {
-            data = {
+            return {
                 bandName: "",
                 recordings: [],
                 ideas: []
             };
-        } else {
-            data = JSON.parse(raw);
-            if (!data.recordings) data.recordings = [];
-            if (!data.ideas) data.ideas = [];
-            if (typeof data.bandName !== "string") data.bandName = "";
         }
+        const data = JSON.parse(raw);
+
+        // Normalize shape
+        if (!data || typeof data !== "object") {
+            return {
+                bandName: "",
+                recordings: [],
+                ideas: []
+            };
+        }
+        if (!Array.isArray(data.recordings)) data.recordings = [];
+        if (!Array.isArray(data.ideas)) data.ideas = [];
+        if (typeof data.bandName !== "string") data.bandName = "";
+
+        return data;
+    } catch (e) {
+        console.warn("getBandWorkspace: failed to parse localStorage:", e);
+        return {
+            bandName: "",
+            recordings: [],
+            ideas: []
+        };
+    }
+}
+
+function saveBandWorkspace(data) {
+    try {
+        localStorage.setItem(BAND_WORKSPACE_KEY, JSON.stringify(data));
+    } catch (e) {
+        console.warn("saveBandWorkspace: failed to write localStorage:", e);
+    }
+}
+
+function saveRecordingMetadataToWorkspace(roomName, bpmValue, label, timestampMs, audioDataUrl) {
+    try {
+        const data = getBandWorkspace();
 
         data.recordings.push({
             roomId: roomName || "Untitled room",
@@ -282,7 +312,13 @@ function saveRecordingMetadataToWorkspace(roomName, bpmValue, label, timestampMs
             audioDataUrl: audioDataUrl || null
         });
 
-        localStorage.setItem(BAND_WORKSPACE_KEY, JSON.stringify(data));
+        saveBandWorkspace(data);
+        console.log("Saved recording to Band Workspace:", {
+            roomId: roomName,
+            bpm: bpmValue,
+            label,
+            timestamp: timestampMs
+        });
     } catch (e) {
         console.warn("Failed to save recording metadata to Band Workspace", e);
     }
@@ -293,27 +329,9 @@ function loadBandWorkspaceRecordings() {
 
     recordingsListContainer.innerHTML = "";
 
-    let data;
-    try {
-        const raw = localStorage.getItem(BAND_WORKSPACE_KEY);
-        if (!raw) {
-            const empty = document.createElement("div");
-            empty.className = "small-label";
-            empty.textContent = "No recordings saved yet. Record something to see it here.";
-            recordingsListContainer.appendChild(empty);
-            return;
-        }
-        data = JSON.parse(raw);
-    } catch (e) {
-        console.warn("Failed to read BAND_WORKSPACE_KEY from localStorage:", e);
-        const error = document.createElement("div");
-        error.className = "small-label";
-        error.textContent = "Could not load recordings.";
-        recordingsListContainer.appendChild(error);
-        return;
-    }
-
+    const data = getBandWorkspace();
     const recordings = Array.isArray(data.recordings) ? data.recordings : [];
+
     if (!recordings.length) {
         const empty = document.createElement("div");
         empty.className = "small-label";
@@ -406,15 +424,58 @@ function loadBandWorkspaceRecordings() {
             console.log("Backing track set from recordings tab:", backingTrackConfig);
             updateBackingUI();
 
-            // Optional: scroll to the Recording card so user sees the backing status change
             const recordingCard = document.querySelector(".card-recording");
             if (recordingCard) {
                 recordingCard.scrollIntoView({ behavior: "smooth", block: "start" });
             }
         });
 
+        // Delete button
+        const deleteBtn = document.createElement("button");
+        deleteBtn.type = "button";
+        deleteBtn.className = "secondary";
+        deleteBtn.textContent = "Delete";
+
+        deleteBtn.addEventListener("click", () => {
+            const ok = confirm(`Delete "${label}"? This cannot be undone.`);
+            if (!ok) return;
+
+            try {
+                const data2 = getBandWorkspace();
+                if (!Array.isArray(data2.recordings)) {
+                    data2.recordings = [];
+                }
+
+                data2.recordings = data2.recordings.filter((r) => {
+                    const sameTimestamp = r.timestamp === rec.timestamp;
+                    const sameRoom = (r.roomId || "") === (rec.roomId || "");
+                    const sameLabel = (r.label || "") === (rec.label || "");
+                    return !(sameTimestamp && sameRoom && sameLabel);
+                });
+
+                saveBandWorkspace(data2);
+
+                // If this was the current backing track, clear it
+                if (
+                    backingTrackConfig &&
+                    backingTrackConfig.audioDataUrl &&
+                    rec.audioDataUrl &&
+                    backingTrackConfig.audioDataUrl === rec.audioDataUrl
+                ) {
+                    backingTrackConfig = null;
+                    updateBackingUI();
+                }
+
+                loadBandWorkspaceRecordings();
+            } catch (e) {
+                console.warn("Failed to delete recording:", e);
+                alert("Could not delete this recording. Check the console for details.");
+            }
+        });
+
         actions.appendChild(playBtn);
         actions.appendChild(useBtn);
+        actions.appendChild(deleteBtn);
 
         row.appendChild(info);
         row.appendChild(actions);
