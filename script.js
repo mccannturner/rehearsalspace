@@ -930,6 +930,39 @@ function handleRemoteMetronome(msg) {
     }
 }
 
+// ========= COUNT-IN (local only) =========
+function playCountIn(bpmVal, beatsPerBar, onComplete) {
+    if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    audioContext.resume();
+
+    const beatMs = 60000 / bpmVal;
+    let beatsPlayed = 0;
+
+    function doBeat() {
+        // If we left COUNT_IN (e.g., error/cancel), stop the count-in silently
+        if (sessionState !== SessionState.COUNT_IN) {
+            return;
+        }
+
+        // Re-use the same click + visual from the metronome
+        metronomeTick();
+        beatsPlayed++;
+
+        if (beatsPlayed >= beatsPerBar) {
+            if (typeof onComplete === "function") {
+                onComplete();
+            }
+        } else {
+            setTimeout(doBeat, beatMs);
+        }
+    }
+
+    // Start immediately with beat 1
+    doBeat();
+}
+
 // ========= RECORDING STATE HELPERS =========
 
 // UI for different recording phases
@@ -960,7 +993,7 @@ function setRecordingUICountIn(recId) {
 
     const isMe = (recId === myUserId);
     recordButton.disabled = !isMe;
-    recordButton.textContent = isMe ? "Recording will start…" : "Preparing to record…";
+    recordButton.textContent = "Count-in… recording will start";
 }
 
 // Lock/unlock mixer controls while recording
@@ -1022,16 +1055,36 @@ function setSessionState(nextState, options = {}) {
 // ========= RECORDING =========
 async function beginRecordFlow() {
     try {
-        // Make sure audio graph + mic are ready
+        // 1) Make sure audio graph + mic are ready
         await getLocalStream();
 
-        // If you want a real count-in later, you can:
-        // setSessionState(SessionState.COUNT_IN, { recorderId: myUserId });
-        // and start recording after a timeout or a few metronome ticks.
-        // For now, we go straight to recording:
-        startRecording();
-        // NOTE: startRecording should call setSessionState(SessionState.RECORDING, { recorderId: myUserId })
-        // once MediaRecorder is started.
+        // 2) Read BPM and time signature from the UI
+        const bpmVal = parseInt(bpmInput && bpmInput.value, 10) || 120;
+        const beatsPerBar = parseInt(timeSignatureSelect && timeSignatureSelect.value, 10) || 4;
+
+        // 3) Enter COUNT_IN state (updates button text + locks mixer)
+        setSessionState(SessionState.COUNT_IN, { recorderId: myUserId });
+
+        // 4) If the normal metronome is already running, just wait one bar using time math
+        if (metronomeRunning) {
+            const beatMs = 60000 / bpmVal;
+            const barMs = beatMs * beatsPerBar;
+
+            setTimeout(() => {
+                if (sessionState === SessionState.COUNT_IN && recorderId === myUserId) {
+                    startRecording(); // will set state to RECORDING
+                }
+            }, barMs);
+            return;
+        }
+
+        // 5) Otherwise, play a *local* count-in click, then start recording
+        playCountIn(bpmVal, beatsPerBar, () => {
+            if (sessionState === SessionState.COUNT_IN && recorderId === myUserId) {
+                startRecording(); // will call setSessionState(SessionState.RECORDING, { recorderId: myUserId })
+            }
+        });
+
     } catch (e) {
         console.error("Could not start recording:", e);
         setSessionState(SessionState.IDLE);
@@ -1270,17 +1323,32 @@ tabButtons.forEach((btn) => {
 });
 
 async function beginRecordFlow() {
-  try {
-    await getLocalStream();
-    setSessionState(SessionState.COUNT_IN, { recorderId: myUserId });
+    try {
+        // 1) Make sure audio graph + mic are ready
+        await getLocalStream();
 
-    // If you add a real count-in later, you’d wait here.
-    startRecording();
-  } catch (e) {
-    console.error("Could not start recording:", e);
-    setSessionState(SessionState.IDLE);
-    // You can show a toast/banner here: "Recording could not start..."
-  }
+        // 2) Read BPM and time signature from the UI
+        const bpmVal = parseInt(bpmInput && bpmInput.value, 10) || 120;
+        const beatsPerBar = parseInt(timeSignatureSelect && timeSignatureSelect.value, 10) || 4;
+
+        // 3) Compute duration of ONE bar in milliseconds
+        const beatMs = 60000 / bpmVal;        // ms per beat
+        const barMs = beatMs * beatsPerBar;   // ms for one full bar
+
+        // 4) Enter COUNT_IN state (updates button text + locks mixer)
+        setSessionState(SessionState.COUNT_IN, { recorderId: myUserId });
+
+        // 5) After one bar, if we're still in COUNT_IN and I'm the recorder, start recording
+        setTimeout(() => {
+            if (sessionState === SessionState.COUNT_IN && recorderId === myUserId) {
+                startRecording(); // this should call setSessionState(SessionState.RECORDING, { recorderId: myUserId })
+            }
+        }, barMs);
+
+    } catch (e) {
+        console.error("Could not start recording:", e);
+        setSessionState(SessionState.IDLE);
+    }
 }
 
 function stopRecordingFlow() {
