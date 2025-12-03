@@ -95,18 +95,104 @@ let metronomeBpm = 120;
 let metronomeBeatsPerBar = 4;
 let metronomeCurrentBeat = 0;
 
-// ========= SESSION / RECORDING STATE =========
+// ========= RECORDING SESSION STATE =========
 const SessionState = {
-  IDLE: "idle",
-  COUNT_IN: "count_in",
-  RECORDING: "recording",
-  SAVING: "saving",
+    IDLE: "idle",
+    COUNT_IN: "count_in",
+    RECORDING: "recording",
+    SAVING: "saving"
 };
 
 let sessionState = SessionState.IDLE;
-let recorderId = null; // userId of whoever is recording (or null)
+let recorderId = null;
 
 // ========= HELPERS =========
+function isMe(userId) {
+    return userId && myUserId && userId === myUserId;
+}
+
+function updateRecordingButtonForState() {
+    if (!recordButton) return;
+
+    const iAmRecorder = isMe(recorderId);
+
+    if (sessionState === SessionState.IDLE) {
+        recordButton.disabled = false;
+        recordButton.textContent = "Start Recording";
+    } else if (sessionState === SessionState.COUNT_IN) {
+        if (iAmRecorder) {
+            recordButton.disabled = false; // you can still click to stop/cancel if you wire that later
+            recordButton.textContent = "Count-in… (record armed)";
+        } else {
+            recordButton.disabled = true;
+            recordButton.textContent = "Recording will start…";
+        }
+    } else if (sessionState === SessionState.RECORDING) {
+        if (iAmRecorder) {
+            recordButton.disabled = false;
+            recordButton.textContent = "Stop Recording";
+        } else {
+            recordButton.disabled = true;
+            recordButton.textContent = "Recording in progress";
+        }
+    } else if (sessionState === SessionState.SAVING) {
+        recordButton.disabled = true;
+        recordButton.textContent = iAmRecorder ? "Saving take…" : "Saving recording…";
+    }
+}
+
+function setMixerLocked(locked) {
+    if (remoteVolumeSlider) remoteVolumeSlider.disabled = locked;
+    if (muteRemoteCheckbox) muteRemoteCheckbox.disabled = locked;
+
+    if (userMixerContainer) {
+        const sliders = userMixerContainer.querySelectorAll('input[type="range"]');
+        sliders.forEach((slider) => {
+            slider.disabled = locked;
+        });
+    }
+
+    const mixerCard = document.querySelector(".card-mixer");
+    if (mixerCard) {
+        mixerCard.classList.toggle("card-locked", locked);
+    }
+}
+
+function setMetronomeLocked(locked) {
+    if (bpmInput) bpmInput.disabled = locked;
+    if (timeSignatureSelect) timeSignatureSelect.disabled = locked;
+    if (metronomeButton) metronomeButton.disabled = locked;
+    if (metronomeVolumeSlider) metronomeVolumeSlider.disabled = locked;
+    if (shareMetronomeCheckbox) shareMetronomeCheckbox.disabled = locked;
+
+    // The metronome lives inside the "Metronome" tab panel
+    const metronomePanel = document.querySelector('.tab-panel[data-tab="metronome"]');
+    if (metronomePanel) {
+        metronomePanel.classList.toggle("card-locked", locked);
+    }
+}
+
+function setBackingLocked(locked) {
+    if (useBackingCheckbox) useBackingCheckbox.disabled = locked;
+
+    const recordingCard = document.querySelector(".card-recording");
+    if (recordingCard) {
+        recordingCard.classList.toggle("card-locked", locked);
+    }
+}
+
+function applyLockStateForSession() {
+    const locked = (
+        sessionState === SessionState.COUNT_IN ||
+        sessionState === SessionState.RECORDING ||
+        sessionState === SessionState.SAVING
+    );
+
+    setMixerLocked(locked);
+    setMetronomeLocked(locked);
+    setBackingLocked(locked);
+}
+
 function createRandomUserId() {
     return "user-" + Math.random().toString(36).slice(2, 10);
 }
@@ -581,34 +667,17 @@ window.addEventListener("message", (event) => {
 });
 
 // ========= RECORDING HELPERS =========
-function setSessionState(nextState, options = {}) {
-  sessionState = nextState;
+function setSessionState(newState, opts = {}) {
+    sessionState = newState;
 
-  switch (nextState) {
-    case SessionState.IDLE: {
-      recorderId = null;
-      // unlock mixer & controls
-      setRecordingUIIdle();
-      break;
+    if (opts.recorderId !== undefined) {
+        recorderId = opts.recorderId;
     }
 
-    case SessionState.COUNT_IN: {
-      recorderId = options.recorderId || myUserId;
-      setRecordingUICountIn(recorderId);
-      break;
-    }
+    console.log("SessionState →", sessionState, "recorderId →", recorderId);
 
-    case SessionState.RECORDING: {
-      recorderId = options.recorderId || myUserId;
-      setRecordingUIRecording(recorderId);
-      break;
-    }
-
-    case SessionState.SAVING: {
-      setRecordingUISaving();
-      break;
-    }
-  }
+    updateRecordingButtonForState();
+    applyLockStateForSession();
 }
 
 function broadcastRecordingState() {

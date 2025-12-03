@@ -395,6 +395,19 @@
             grid-column: 2 / 3;
             grid-row: 3 / 4;
         }
+.card-locked {
+    opacity: 0.6;
+}
+
+.card-locked input,
+.card-locked button {
+    cursor: not-allowed;
+}
+.card-locked .card-subtitle::after {
+    content: " • Recording active";
+    color: #D64545;
+    font-weight: 500;
+}
 
 /* Tabs */
 #tab-bar {
