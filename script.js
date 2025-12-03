@@ -930,59 +930,64 @@ function handleRemoteMetronome(msg) {
     }
 }
 
-// ========= COUNT-IN CLICKS (local only) =========
-function playCountInClicks(bpmVal, beatsPerBar, onComplete) {
-    // Ensure audio context exists and is running
+function debugBeep(label) {
+    console.log("debugBeep:", label, "audioContext state:", audioContext && audioContext.state);
+
     if (!audioContext) {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
     }
-    audioContext.resume();
+
+    // Try to resume; don't await, just fire and forget
+    if (audioContext.state === "suspended" && audioContext.resume) {
+        audioContext.resume();
+    }
 
     const ctx = audioContext;
-    const beatSeconds = 60 / bpmVal;
-    const startTime = ctx.currentTime + 0.05; // tiny buffer so first click isn't cut off
+    if (!ctx) return;
 
-    // Use the same volume slider as the main metronome, if present
-    const volBase = metronomeVolumeSlider
-        ? (parseInt(metronomeVolumeSlider.value, 10) || 70) / 100
-        : 0.7;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
 
-    for (let i = 0; i < beatsPerBar; i++) {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
+    gain.gain.value = 0.5;
+    osc.frequency.value = 880; // simple beep
 
-        const isDownbeat = (i === 0);
-        const gainValue = volBase * (isDownbeat ? 1.0 : 0.7);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
 
-        gain.gain.value = gainValue;
-        osc.frequency.value = isDownbeat ? 1500 : 1000;
+    const t = ctx.currentTime + 0.02; // tiny buffer
+    osc.start(t);
+    osc.stop(t + 0.08);
+}
 
-        osc.connect(gain);
-        gain.connect(ctx.destination);
+function simpleCountIn(bpmVal, beatsPerBar, onComplete) {
+    const beatMs = 60000 / bpmVal;
+    let beat = 0;
 
-        const t = startTime + i * beatSeconds;
-        osc.start(t);
-        osc.stop(t + 0.05);
+    function nextBeat() {
+        // If we left COUNT_IN (user cancelled / error), stop the sequence
+        if (sessionState !== SessionState.COUNT_IN) {
+            console.log("simpleCountIn: aborted, state =", sessionState);
+            return;
+        }
 
-        // Optional: visual beat indicator using timeouts
-        if (beatIndicator) {
-            const msFromNow = Math.max((t - ctx.currentTime) * 1000, 0);
-            setTimeout(() => {
-                beatIndicator.style.backgroundColor = isDownbeat ? "#39393F" : "#B0B0B8";
-                setTimeout(() => {
-                    beatIndicator.style.backgroundColor = "transparent";
-                }, 80);
-            }, msFromNow);
+        beat += 1;
+        console.log("simpleCountIn: beat", beat, "of", beatsPerBar);
+
+        // 🔊 Use the same working beep we just proved works
+        debugBeep("count-in beat " + beat);
+
+        if (beat >= beatsPerBar) {
+            // Slight pad before starting recording
+            if (typeof onComplete === "function") {
+                setTimeout(() => onComplete(), 80);
+            }
+        } else {
+            setTimeout(nextBeat, beatMs);
         }
     }
 
-    // Call onComplete after the last click
-    const totalDurationMs = beatSeconds * beatsPerBar * 1000;
-    if (typeof onComplete === "function") {
-        setTimeout(() => {
-            onComplete();
-        }, totalDurationMs + 60); // slight pad
-    }
+    // Start immediately
+    nextBeat();
 }
 
 // ========= RECORDING STATE HELPERS =========
@@ -1084,14 +1089,19 @@ async function beginRecordFlow() {
         const bpmVal = parseInt(bpmInput && bpmInput.value, 10) || 120;
         const beatsPerBar = parseInt(timeSignatureSelect && timeSignatureSelect.value, 10) || 4;
 
+        console.log("beginRecordFlow: bpm =", bpmVal, "beatsPerBar =", beatsPerBar);
+
         // 3) Enter COUNT_IN state (updates button text + locks mixer)
         setSessionState(SessionState.COUNT_IN, { recorderId: myUserId });
 
-        // 4) Play local count-in clicks, then start recording
-        playCountInClicks(bpmVal, beatsPerBar, () => {
-            // Only start if we're still in COUNT_IN and I'm the recorder
+        // 4) Run simple local count-in, then start recording
+        simpleCountIn(bpmVal, beatsPerBar, () => {
+            // Only start if we're still in COUNT_IN and *I'm* the recorder
             if (sessionState === SessionState.COUNT_IN && recorderId === myUserId) {
-                startRecording(); // this should set state to RECORDING
+                console.log("beginRecordFlow: count-in complete, starting recording");
+                startRecording(); // should set SessionState.RECORDING
+            } else {
+                console.log("beginRecordFlow: count-in complete but state/recorder changed; not recording");
             }
         });
 
@@ -1306,7 +1316,7 @@ recordButton.addEventListener("click", async () => {
     }
 
     // 2) Explicitly resume in direct response to the click
-    if (audioContext.state === "suspended") {
+    if (audioContext.state === "suspended" && audioContext.resume) {
         try {
             await audioContext.resume();
         } catch (e) {
@@ -1314,12 +1324,11 @@ recordButton.addEventListener("click", async () => {
         }
     }
 
-    // 3) Now handle recording state
+    // 3) Handle recording state
     if (sessionState === SessionState.IDLE) {
-        // Start a new recording flow (this will trigger count-in first)
+        // NO debugBeep here anymore
         beginRecordFlow();
     } else if (sessionState === SessionState.RECORDING || sessionState === SessionState.SAVING) {
-        // Only the current recorder can stop
         if (recorderId === myUserId) {
             stopRecordingFlow();
         }
@@ -1352,27 +1361,50 @@ async function beginRecordFlow() {
         // 1) Make sure audio graph + mic are ready
         await getLocalStream();
 
-        // 2) Read BPM and time signature from the UI
+        // 2) Ensure audioContext exists and is running
+        if (!audioContext) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (audioContext.state === "suspended" && audioContext.resume) {
+            await audioContext.resume();
+        }
+
+        // 3) Read BPM and time signature from the UI
         const bpmVal = parseInt(bpmInput && bpmInput.value, 10) || 120;
         const beatsPerBar = parseInt(timeSignatureSelect && timeSignatureSelect.value, 10) || 4;
 
-        // 3) Compute duration of ONE bar in milliseconds
-        const beatMs = 60000 / bpmVal;        // ms per beat
-        const barMs = beatMs * beatsPerBar;   // ms for one full bar
+        const beatMs = 60000 / bpmVal;
+        const totalMs = beatMs * beatsPerBar;
 
-        // 4) Enter COUNT_IN state (updates button text + locks mixer)
-        setSessionState(SessionState.COUNT_IN, { recorderId: myUserId });
+        console.log("beginRecordFlow: starting count-in",
+            { bpmVal, beatsPerBar, beatMs, totalMs });
 
-        // 5) After one bar, if we're still in COUNT_IN and I'm the recorder, start recording
+        // 4) Move into COUNT_IN state (for UI/mixer lock)
+        if (typeof setSessionState === "function" && SessionState && SessionState.COUNT_IN) {
+            setSessionState(SessionState.COUNT_IN, { recorderId: myUserId });
+        }
+
+        // 5) Fire one beep per beat using the SAME working debugBeep
+        for (let i = 0; i < beatsPerBar; i++) {
+            const delay = i * beatMs;
+            setTimeout(() => {
+                console.log("count-in beat", i + 1, "of", beatsPerBar);
+                // This is the EXACT beep you already hear from the button
+                debugBeep("count-in beat " + (i + 1));
+            }, delay);
+        }
+
+        // 6) After the final beat, actually start recording
         setTimeout(() => {
-            if (sessionState === SessionState.COUNT_IN && recorderId === myUserId) {
-                startRecording(); // this should call setSessionState(SessionState.RECORDING, { recorderId: myUserId })
-            }
-        }, barMs);
+            console.log("beginRecordFlow: count-in done, starting recording");
+            startRecording(); // should call setSessionState(SessionState.RECORDING, ...)
+        }, totalMs + 100);
 
     } catch (e) {
         console.error("Could not start recording:", e);
-        setSessionState(SessionState.IDLE);
+        if (typeof setSessionState === "function" && SessionState && SessionState.IDLE) {
+            setSessionState(SessionState.IDLE);
+        }
     }
 }
 
