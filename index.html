@@ -396,6 +396,38 @@
             grid-row: 3 / 4;
         }
 
+        /* Tabs */
+#tab-bar {
+    display: flex;
+    gap: 8px;
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+}
+
+#tab-bar button {
+    font-size: 12px;
+    padding: 4px 10px;
+}
+
+#tab-bar button.active {
+    background: var(--primary);
+    color: #fff;
+}
+
+#tab-panels {
+    margin-top: 12px;
+}
+
+.tab-panel {
+    display: none;
+}
+
+.tab-panel.active {
+    display: block;
+}
+
         @media (max-width: 900px) {
             main {
                 padding: 16px;
@@ -598,32 +630,6 @@
                 </div>
             </div>
 
-            <!-- Chat -->
-            <div class="card card-chat">
-                <div class="card-header">
-                    <div class="card-title">
-                        <span class="icon-title">
-                            <!-- Chat icon -->
-                            <svg width="18" height="18" viewBox="0 0 24 24"
-                                 fill="none" stroke="#2C2C2E" stroke-width="1.75"
-                                 stroke-linecap="round" stroke-linejoin="round">
-                              <path d="M4 5h16v10H7l-3 3V5z"/>
-                              <circle cx="10" cy="10" r="1.5" fill="#39393F"/>
-                              <circle cx="14" cy="10" r="1.5"/>
-                            </svg>
-                            Chat
-                        </span>
-                    </div>
-                    <div class="card-subtitle">Capture notes and decisions while you rehearse</div>
-                </div>
-
-                <div id="chat-messages"></div>
-                <div class="chat-input-row">
-                    <input id="chat-input" type="text" placeholder="Type a message and press Enter...">
-                    <button id="chat-send" class="secondary">Send</button>
-                </div>
-            </div>
-
             <!-- Metronome -->
             <div class="card card-metronome">
                 <div class="card-header">
@@ -701,6 +707,91 @@
     </div>
     <div class="card-subtitle">Capture takes to review later</div>
   </div>
+
+<!-- Tabs: Chat / Band / Mixer / Settings -->
+<div class="card card-tabs">
+    <div class="card-header">
+        <div class="card-title">
+            Workspace
+        </div>
+        <div class="card-subtitle">Chat, band, mixer & settings</div>
+    </div>
+
+    <!-- Tab bar -->
+    <div id="tab-bar">
+        <button type="button" data-tab-target="chat" class="active">Chat</button>
+        <button type="button" data-tab-target="band">Band</button>
+        <button type="button" data-tab-target="mixer">Mixer</button>
+        <button type="button" data-tab-target="settings">Settings</button>
+    </div>
+
+    <!-- Tab panels -->
+    <div id="tab-panels">
+        <!-- We’ll paste content into these in the next steps -->
+        <div class="tab-panel active" data-tab="chat"></div>  
+                        <!-- Chat -->
+                <div class="card-header">
+                    <div class="card-title">
+                        <span class="icon-title">
+                            <!-- Chat icon -->
+                            <svg width="18" height="18" viewBox="0 0 24 24"
+                                 fill="none" stroke="#2C2C2E" stroke-width="1.75"
+                                 stroke-linecap="round" stroke-linejoin="round">
+                              <path d="M4 5h16v10H7l-3 3V5z"/>
+                              <circle cx="10" cy="10" r="1.5" fill="#39393F"/>
+                              <circle cx="14" cy="10" r="1.5"/>
+                            </svg>
+                            Chat
+                        </span>
+                    </div>
+                    <div class="card-subtitle">Capture notes and decisions while you rehearse</div>
+                </div>
+
+                <div id="chat-messages"></div>
+                <div class="chat-input-row">
+                    <input id="chat-input" type="text" placeholder="Type a message and press Enter...">
+                    <button id="chat-send" class="secondary">Send</button>
+                </div>
+            </div>
+        <div class="tab-panel" data-tab="band"></div>
+        <div class="section-column">
+    <div id="room-status">Not in a room</div>
+
+    <div class="latency-row">
+        <div id="latency-display">Latency: -- (waiting for other users)</div>
+        <div class="status-pill" id="audio-status-pill">
+            <span class="status-dot" id="audio-status-dot"></span>
+            <span id="audio-status-text">Not in room</span>
+        </div>
+    </div>
+
+    <div class="latency-debug">
+        <div class="small-label">Latency debug</div>
+        <div id="latency-stats">
+            Avg: -- ms · Min: -- · Max: -- · Jitter: -- ms (0 samples)
+        </div>
+    </div>
+
+    <div style="margin-top: 10px;">
+        <div class="small-label">Users in this room:</div>
+        <ul id="user-list"></ul>
+    </div>
+
+    <div style="margin-top: 12px;">
+        <div class="small-label">Invite your band:</div>
+        <div class="section-row" style="margin-top: 4px;">
+            <input id="invite-link" type="text" readonly placeholder="Join a room to get an invite link">
+            <button id="invite-copy" class="secondary">Copy link</button>
+        </div>
+        <div id="invite-copied" class="small-label" style="display:none; margin-top:4px;">
+            ✅ Link copied!
+        </div>
+    </div>
+</div>
+        <div class="tab-panel" data-tab="mixer"></div>
+        <div class="tab-panel" data-tab="settings"></div>
+    </div>
+</div>
 
   <div class="section-column" style="gap: 8px;">
     <div class="section-row">

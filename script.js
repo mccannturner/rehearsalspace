@@ -93,6 +93,17 @@ let metronomeBpm = 120;
 let metronomeBeatsPerBar = 4;
 let metronomeCurrentBeat = 0;
 
+// ========= SESSION / RECORDING STATE =========
+const SessionState = {
+  IDLE: "idle",
+  COUNT_IN: "count_in",
+  RECORDING: "recording",
+  SAVING: "saving",
+};
+
+let sessionState = SessionState.IDLE;
+let recorderId = null; // userId of whoever is recording (or null)
+
 // ========= HELPERS =========
 function createRandomUserId() {
     return "user-" + Math.random().toString(36).slice(2, 10);
@@ -371,6 +382,108 @@ window.addEventListener("message", (event) => {
     updateBackingUI();
 });
 
+// ========= RECORDING HELPERS =========
+function setSessionState(nextState, options = {}) {
+  sessionState = nextState;
+
+  switch (nextState) {
+    case SessionState.IDLE: {
+      recorderId = null;
+      // unlock mixer & controls
+      setRecordingUIIdle();
+      break;
+    }
+
+    case SessionState.COUNT_IN: {
+      recorderId = options.recorderId || myUserId;
+      setRecordingUICountIn(recorderId);
+      break;
+    }
+
+    case SessionState.RECORDING: {
+      recorderId = options.recorderId || myUserId;
+      setRecordingUIRecording(recorderId);
+      break;
+    }
+
+    case SessionState.SAVING: {
+      setRecordingUISaving();
+      break;
+    }
+  }
+}
+
+function broadcastRecordingState() {
+  if (!socket || socket.readyState !== WebSocket.OPEN || !currentRoomId) return;
+  socket.send(JSON.stringify({
+    type: "recording-state",
+    roomId: currentRoomId,
+    state: sessionState,
+    recorderId: recorderId,
+    timestamp: Date.now(),
+  }));
+}
+
+function setRecordingUIIdle() {
+  if (recordButton) {
+    recordButton.textContent = "Start Recording";
+    recordButton.disabled = false;
+  }
+
+  // unlock mixer
+  if (remoteVolumeSlider) remoteVolumeSlider.disabled = false;
+  if (muteRemoteCheckbox) muteRemoteCheckbox.disabled = false;
+
+  // per-user sliders
+  if (userMixerContainer) {
+    Array.from(userMixerContainer.querySelectorAll('input[type="range"]'))
+      .forEach(slider => slider.disabled = false);
+  }
+
+  // optional: clear any banners
+  // updateRecordingBanner("Session Active · Saved ✅");
+}
+
+function setRecordingUICountIn(recId) {
+  if (recordButton) {
+    recordButton.textContent = recId === myUserId ? "Recording… (tap to stop)" : "Recording…";
+    recordButton.disabled = (recId !== myUserId);
+  }
+
+  // lock mixer
+  lockMixerSliders();
+
+  // updateRecordingBanner(`Recording starting — ${recId === myUserId ? "You" : recId}`);
+}
+
+function setRecordingUIRecording(recId) {
+  if (recordButton) {
+    recordButton.textContent = recId === myUserId ? "Stop Recording" : "Recording…";
+    recordButton.disabled = (recId !== myUserId);
+  }
+  lockMixerSliders();
+  // updateRecordingBanner(`Recording in progress — ${recId === myUserId ? "You" : recId}`);
+}
+
+function setRecordingUISaving() {
+  if (recordButton) {
+    recordButton.textContent = "Saving…";
+    recordButton.disabled = true;
+  }
+  lockMixerSliders();
+  // updateRecordingBanner("Saving recording…");
+}
+
+function lockMixerSliders() {
+  if (remoteVolumeSlider) remoteVolumeSlider.disabled = true;
+  if (muteRemoteCheckbox) muteRemoteCheckbox.disabled = true;
+
+  if (userMixerContainer) {
+    Array.from(userMixerContainer.querySelectorAll('input[type="range"]'))
+      .forEach(slider => slider.disabled = true);
+  }
+}
+
 // ========= SOCKET HANDLING =========
 function ensureSocket() {
     if (socket && socket.readyState === WebSocket.OPEN) {
@@ -435,7 +548,10 @@ function ensureSocket() {
                 latencySamples.shift();
             }
             updateLatencyStats();
-        }
+        } else if (type === "recording-state") {
+             const { state, recorderId: recId } = msg;
+            setSessionState(state, { recorderId: recId });
+        }   
     };
 
     socket.onclose = () => {
@@ -828,46 +944,8 @@ function startRecording() {
     };
 
     mediaRecorder.onstop = () => {
-        const blob = new Blob(recordedChunks, { type: "audio/webm" });
-        const url = URL.createObjectURL(blob);
-
-        const now = new Date();
-        const datePart = now.toISOString().slice(0, 10); // YYYY-MM-DD
-        const timePart = now.toTimeString().slice(0, 5).replace(":", "-"); // HH-MM
-
-        const roomName = currentRoomId || "Untitled-room";
-        const bpmValue = parseInt(bpmInput.value, 10) || 120;
-        const label = (takeLabelInput && takeLabelInput.value.trim()) || "";
-
-        let title = `${roomName} – ${bpmValue} BPM`;
-        if (label) {
-            title += ` – ${label}`;
-        }
-        title += ` – ${datePart} ${timePart}`;
-
-        const filenameSafe = title.replace(/[^\w\- ()]/g, "_");
-
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `${filenameSafe}.webm`;
-        link.textContent = title;
-        link.style.display = "block";
-
-        recordingsContainer.innerHTML = "";
-        recordingsContainer.appendChild(link);
-
-        if (takeLabelInput) {
-            takeLabelInput.value = "";
-        }
-
-        // Save metadata + audio to Band Workspace
-        const reader = new FileReader();
-        reader.onloadend = () => {
-            const audioDataUrl = reader.result;
-            saveRecordingMetadataToWorkspace(roomName, bpmValue, label, now.getTime(), audioDataUrl);
-        };
-        reader.readAsDataURL(blob);
-    };
+        handleRecordingFinished();
+};
 
     // ==== Backing track: play & route into recording ====
     if (
@@ -911,19 +989,61 @@ function startRecording() {
     // ================================================
 
     mediaRecorder.start();
-    recordButton.textContent = "Stop Recording";
+    setSessionState(SessionState.RECORDING, { recorderId: myUserId });
 }
 
 function stopRecording() {
     if (mediaRecorder && mediaRecorder.state === "recording") {
-        mediaRecorder.stop();
-        recordButton.textContent = "Start Recording";
+        mediaRecorder.stop();  // triggers handleRecordingFinished()
     }
 
     if (backingAudioElement && !backingAudioElement.paused) {
         backingAudioElement.pause();
     }
 }
+
+
+function handleRecordingFinished() {
+        const blob = new Blob(recordedChunks, { type: "audio/webm" });
+        const url = URL.createObjectURL(blob);
+
+        const now = new Date();
+        const datePart = now.toISOString().slice(0, 10); // YYYY-MM-DD
+        const timePart = now.toTimeString().slice(0, 5).replace(":", "-"); // HH-MM
+
+        const roomName = currentRoomId || "Untitled-room";
+        const bpmValue = parseInt(bpmInput.value, 10) || 120;
+        const label = (takeLabelInput && takeLabelInput.value.trim()) || "";
+
+        let title = `${roomName} – ${bpmValue} BPM`;
+        if (label) {
+            title += ` – ${label}`;
+        }
+        title += ` – ${datePart} ${timePart}`;
+
+        const filenameSafe = title.replace(/[^\w\- ()]/g, "_");
+
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `${filenameSafe}.webm`;
+        link.textContent = title;
+        link.style.display = "block";
+
+        recordingsContainer.innerHTML = "";
+        recordingsContainer.appendChild(link);
+
+        if (takeLabelInput) {
+            takeLabelInput.value = "";
+        }
+
+        // Save metadata + audio to Band Workspace
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            const audioDataUrl = reader.result;
+            saveRecordingMetadataToWorkspace(roomName, bpmValue, label, now.getTime(), audioDataUrl);
+        };
+        reader.readAsDataURL(blob);
+    };
 
 // ========= UI EVENT HANDLERS =========
 startButton.addEventListener("click", async () => {
@@ -998,12 +1118,59 @@ metronomeButton.addEventListener("click", () => {
 });
 
 recordButton.addEventListener("click", () => {
-    if (!mediaRecorder || mediaRecorder.state !== "recording") {
-        startRecording();
+  if (sessionState === SessionState.IDLE) {
+    // I want to start recording
+    beginRecordFlow();
+  } else if (sessionState === SessionState.COUNT_IN || sessionState === SessionState.RECORDING) {
+    // Only the recorder can stop
+    if (recorderId === myUserId) {
+      stopRecordingFlow();
     } else {
-        stopRecording();
+      // ignore or show "Jake is recording" message
     }
+  }
 });
+
+// ========= TABS =========
+const tabBar = document.getElementById("tab-bar");
+const tabButtons = tabBar ? tabBar.querySelectorAll("button[data-tab-target]") : [];
+const tabPanels = document.querySelectorAll(".tab-panel[data-tab]");
+
+tabButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+        const target = btn.getAttribute("data-tab-target");
+
+        // update button active state
+        tabButtons.forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+
+        // show the matching panel
+        tabPanels.forEach((panel) => {
+            const panelTab = panel.getAttribute("data-tab");
+            panel.classList.toggle("active", panelTab === target);
+        });
+    });
+});
+
+async function beginRecordFlow() {
+  try {
+    await getLocalStream();
+    setSessionState(SessionState.COUNT_IN, { recorderId: myUserId });
+
+    // If you add a real count-in later, you’d wait here.
+    startRecording();
+  } catch (e) {
+    console.error("Could not start recording:", e);
+    setSessionState(SessionState.IDLE);
+    // You can show a toast/banner here: "Recording could not start..."
+  }
+}
+
+function stopRecordingFlow() {
+  // Go to SAVING first
+  setSessionState(SessionState.SAVING);
+  stopRecording(); // your existing function (triggers mediaRecorder.onstop)
+}
 
 remoteVolumeSlider.addEventListener("input", () => {
     applyVolumes();
