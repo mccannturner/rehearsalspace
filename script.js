@@ -930,37 +930,59 @@ function handleRemoteMetronome(msg) {
     }
 }
 
-// ========= COUNT-IN (local only) =========
-function playCountIn(bpmVal, beatsPerBar, onComplete) {
+// ========= COUNT-IN CLICKS (local only) =========
+function playCountInClicks(bpmVal, beatsPerBar, onComplete) {
+    // Ensure audio context exists and is running
     if (!audioContext) {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
     }
     audioContext.resume();
 
-    const beatMs = 60000 / bpmVal;
-    let beatsPlayed = 0;
+    const ctx = audioContext;
+    const beatSeconds = 60 / bpmVal;
+    const startTime = ctx.currentTime + 0.05; // tiny buffer so first click isn't cut off
 
-    function doBeat() {
-        // If we left COUNT_IN (e.g., error/cancel), stop the count-in silently
-        if (sessionState !== SessionState.COUNT_IN) {
-            return;
-        }
+    // Use the same volume slider as the main metronome, if present
+    const volBase = metronomeVolumeSlider
+        ? (parseInt(metronomeVolumeSlider.value, 10) || 70) / 100
+        : 0.7;
 
-        // Re-use the same click + visual from the metronome
-        metronomeTick();
-        beatsPlayed++;
+    for (let i = 0; i < beatsPerBar; i++) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
 
-        if (beatsPlayed >= beatsPerBar) {
-            if (typeof onComplete === "function") {
-                onComplete();
-            }
-        } else {
-            setTimeout(doBeat, beatMs);
+        const isDownbeat = (i === 0);
+        const gainValue = volBase * (isDownbeat ? 1.0 : 0.7);
+
+        gain.gain.value = gainValue;
+        osc.frequency.value = isDownbeat ? 1500 : 1000;
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        const t = startTime + i * beatSeconds;
+        osc.start(t);
+        osc.stop(t + 0.05);
+
+        // Optional: visual beat indicator using timeouts
+        if (beatIndicator) {
+            const msFromNow = Math.max((t - ctx.currentTime) * 1000, 0);
+            setTimeout(() => {
+                beatIndicator.style.backgroundColor = isDownbeat ? "#39393F" : "#B0B0B8";
+                setTimeout(() => {
+                    beatIndicator.style.backgroundColor = "transparent";
+                }, 80);
+            }, msFromNow);
         }
     }
 
-    // Start immediately with beat 1
-    doBeat();
+    // Call onComplete after the last click
+    const totalDurationMs = beatSeconds * beatsPerBar * 1000;
+    if (typeof onComplete === "function") {
+        setTimeout(() => {
+            onComplete();
+        }, totalDurationMs + 60); // slight pad
+    }
 }
 
 // ========= RECORDING STATE HELPERS =========
@@ -1065,23 +1087,11 @@ async function beginRecordFlow() {
         // 3) Enter COUNT_IN state (updates button text + locks mixer)
         setSessionState(SessionState.COUNT_IN, { recorderId: myUserId });
 
-        // 4) If the normal metronome is already running, just wait one bar using time math
-        if (metronomeRunning) {
-            const beatMs = 60000 / bpmVal;
-            const barMs = beatMs * beatsPerBar;
-
-            setTimeout(() => {
-                if (sessionState === SessionState.COUNT_IN && recorderId === myUserId) {
-                    startRecording(); // will set state to RECORDING
-                }
-            }, barMs);
-            return;
-        }
-
-        // 5) Otherwise, play a *local* count-in click, then start recording
-        playCountIn(bpmVal, beatsPerBar, () => {
+        // 4) Play local count-in clicks, then start recording
+        playCountInClicks(bpmVal, beatsPerBar, () => {
+            // Only start if we're still in COUNT_IN and I'm the recorder
             if (sessionState === SessionState.COUNT_IN && recorderId === myUserId) {
-                startRecording(); // will call setSessionState(SessionState.RECORDING, { recorderId: myUserId })
+                startRecording(); // this should set state to RECORDING
             }
         });
 
@@ -1289,9 +1299,24 @@ metronomeButton.addEventListener("click", () => {
     }
 });
 
-recordButton.addEventListener("click", () => {
+recordButton.addEventListener("click", async () => {
+    // 1) Make sure AudioContext exists
+    if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+
+    // 2) Explicitly resume in direct response to the click
+    if (audioContext.state === "suspended") {
+        try {
+            await audioContext.resume();
+        } catch (e) {
+            console.warn("AudioContext resume failed in record click:", e);
+        }
+    }
+
+    // 3) Now handle recording state
     if (sessionState === SessionState.IDLE) {
-        // Start a new recording
+        // Start a new recording flow (this will trigger count-in first)
         beginRecordFlow();
     } else if (sessionState === SessionState.RECORDING || sessionState === SessionState.SAVING) {
         // Only the current recorder can stop
