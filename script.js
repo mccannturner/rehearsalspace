@@ -624,6 +624,9 @@ async function getLocalStream() {
         recordDestination = audioContext.createMediaStreamDestination();
         localSource.connect(recordDestination);
 
+        // ✅ NEW: refresh audio status now that mic is live
+        updateAudioStatus();
+
         return localStream;
     } catch (err) {
         console.error("Microphone access failed:", err);
