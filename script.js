@@ -209,37 +209,6 @@ function updateRoomStatus() {
 
 function updateUserList() {
     userList.innerHTML = "";
-
-    if (!usersInRoom.length) {
-        const li = document.createElement("li");
-        li.textContent = "No one here yet.";
-        userList.appendChild(li);
-        return;
-    }
-
-    // Put "You" first, then bandmates
-    const sorted = [...usersInRoom];
-    sorted.sort((a, b) => {
-        if (a === myUserId) return -1;
-        if (b === myUserId) return 1;
-        return 0;
-    });
-
-    let bandmateNumber = 1;
-
-    sorted.forEach((uid) => {
-        const li = document.createElement("li");
-        if (uid === myUserId) {
-            li.textContent = "You";
-        } else {
-            li.textContent = `Bandmate ${bandmateNumber++}`;
-        }
-        userList.appendChild(li);
-    });
-}
-
-function updateUserList() {
-    userList.innerHTML = "";
     usersInRoom.forEach((uid) => {
         const li = document.createElement("li");
         li.textContent = uid === myUserId ? `${uid} (you)` : uid;
@@ -678,7 +647,9 @@ function setSessionState(newState, opts = {}) {
 
     updateRecordingButtonForState();
     applyLockStateForSession();
+    broadcastRecordingState(); // <- add this line
 }
+
 
 function broadcastRecordingState() {
   if (!socket || socket.readyState !== WebSocket.OPEN || !currentRoomId) return;
@@ -1257,132 +1228,13 @@ function simpleCountIn(bpmVal, beatsPerBar, onComplete) {
     nextBeat();
 }
 
-// ========= RECORDING STATE HELPERS =========
-
-// UI for different recording phases
-function setRecordingUIIdle() {
-    if (recordButton) {
-        recordButton.disabled = false;
-        recordButton.textContent = "Start Recording";
-    }
-}
-
-function setRecordingUIRecording(recId) {
-    if (!recordButton) return;
-
-    const isMe = (recId === myUserId);
-    recordButton.disabled = !isMe;
-    recordButton.textContent = isMe ? "Stop Recording" : "Recording…";
-}
-
-function setRecordingUISaving() {
-    if (!recordButton) return;
-    recordButton.disabled = true;
-    recordButton.textContent = "Saving…";
-}
-
-// For now we won't really use COUNT_IN, but we support it.
-function setRecordingUICountIn(recId) {
-    if (!recordButton) return;
-
-    const isMe = (recId === myUserId);
-    recordButton.disabled = !isMe;
-    recordButton.textContent = "Count-in… recording will start";
-}
-
-// Lock/unlock mixer controls while recording
-function lockMixerSliders() {
-    if (remoteVolumeSlider) remoteVolumeSlider.disabled = true;
-    if (muteRemoteCheckbox) muteRemoteCheckbox.disabled = true;
-
-    if (userMixerContainer) {
-        Array.from(userMixerContainer.querySelectorAll('input[type="range"]'))
-            .forEach(slider => slider.disabled = true);
-    }
-}
-
-function unlockMixerSliders() {
-    if (remoteVolumeSlider) remoteVolumeSlider.disabled = false;
-    if (muteRemoteCheckbox) muteRemoteCheckbox.disabled = false;
-
-    if (userMixerContainer) {
-        Array.from(userMixerContainer.querySelectorAll('input[type="range"]'))
-            .forEach(slider => slider.disabled = false);
-    }
-}
-
-// Central state setter used by recording + future features
-function setSessionState(nextState, options = {}) {
-    sessionState = nextState;
-
-    // recorderId is "who owns" the current recording session
-    if (options.recorderId) {
-        recorderId = options.recorderId;
-    } else if (!recorderId) {
-        recorderId = myUserId;
-    }
-
-    switch (nextState) {
-        case SessionState.IDLE:
-            recorderId = null;
-            setRecordingUIIdle();
-            unlockMixerSliders();
-            break;
-
-        case SessionState.COUNT_IN:
-            setRecordingUICountIn(recorderId);
-            lockMixerSliders();
-            break;
-
-        case SessionState.RECORDING:
-            setRecordingUIRecording(recorderId);
-            lockMixerSliders();
-            break;
-
-        case SessionState.SAVING:
-            setRecordingUISaving();
-            lockMixerSliders();
-            break;
-    }
-}
-
 // ========= RECORDING =========
-async function beginRecordFlow() {
-    try {
-        // 1) Make sure audio graph + mic are ready
-        await getLocalStream();
 
-        // 2) Read BPM and time signature from the UI
-        const bpmVal = parseInt(bpmInput && bpmInput.value, 10) || 120;
-        const beatsPerBar = parseInt(timeSignatureSelect && timeSignatureSelect.value, 10) || 4;
-
-        console.log("beginRecordFlow: bpm =", bpmVal, "beatsPerBar =", beatsPerBar);
-
-        // 3) Enter COUNT_IN state (updates button text + locks mixer)
-        setSessionState(SessionState.COUNT_IN, { recorderId: myUserId });
-
-        // 4) Run simple local count-in, then start recording
-        simpleCountIn(bpmVal, beatsPerBar, () => {
-            // Only start if we're still in COUNT_IN and *I'm* the recorder
-            if (sessionState === SessionState.COUNT_IN && recorderId === myUserId) {
-                console.log("beginRecordFlow: count-in complete, starting recording");
-                startRecording(); // should set SessionState.RECORDING
-            } else {
-                console.log("beginRecordFlow: count-in complete but state/recorder changed; not recording");
-            }
-        });
-
-    } catch (e) {
-        console.error("Could not start recording:", e);
-        setSessionState(SessionState.IDLE);
-    }
-}
-
-function stopRecordingFlow() {
-    // Show "Saving…" and lock mixer
-    setSessionState(SessionState.SAVING, { recorderId: myUserId });
-    // This will trigger mediaRecorder.onstop → handleRecordingFinished()
-    stopRecording();
+// High-level entry point when it's time to actually start recording
+function startRecordingFlow() {
+    // State → RECORDING so UI shows proper button + locks
+    setSessionState(SessionState.RECORDING, { recorderId: myUserId });
+    startRecording(); // low-level MediaRecorder setup + start
 }
 
 function startRecording() {
@@ -1403,7 +1255,7 @@ function startRecording() {
 
     mediaRecorder.onstop = () => {
         handleRecordingFinished();
-};
+    };
 
     // ==== Backing track: play & route into recording ====
     if (
@@ -1447,7 +1299,7 @@ function startRecording() {
     // ================================================
 
     mediaRecorder.start();
-    setSessionState(SessionState.RECORDING, { recorderId: myUserId });
+    console.log("⏺️ MediaRecorder started, state =", mediaRecorder.state);
 }
 
 function stopRecording() {
@@ -1458,51 +1310,52 @@ function stopRecording() {
     if (backingAudioElement && !backingAudioElement.paused) {
         backingAudioElement.pause();
     }
+    console.log("⏹️ MediaRecorder stopped");
 }
 
-
 function handleRecordingFinished() {
-        const blob = new Blob(recordedChunks, { type: "audio/webm" });
-        const url = URL.createObjectURL(blob);
+    const blob = new Blob(recordedChunks, { type: "audio/webm" });
+    const url = URL.createObjectURL(blob);
 
-        const now = new Date();
-        const datePart = now.toISOString().slice(0, 10); // YYYY-MM-DD
-        const timePart = now.toTimeString().slice(0, 5).replace(":", "-"); // HH-MM
+    const now = new Date();
+    const datePart = now.toISOString().slice(0, 10); // YYYY-MM-DD
+    const timePart = now.toTimeString().slice(0, 5).replace(":", "-"); // HH-MM
 
-        const roomName = currentRoomId || "Untitled-room";
-        const bpmValue = parseInt(bpmInput.value, 10) || 120;
-        const label = (takeLabelInput && takeLabelInput.value.trim()) || "";
+    const roomName = currentRoomId || "Untitled-room";
+    const bpmValue = parseInt(bpmInput.value, 10) || 120;
+    const label = (takeLabelInput && takeLabelInput.value.trim()) || "";
 
-        let title = `${roomName} – ${bpmValue} BPM`;
-        if (label) {
-            title += ` – ${label}`;
-        }
-        title += ` – ${datePart} ${timePart}`;
+    let title = `${roomName} – ${bpmValue} BPM`;
+    if (label) {
+        title += ` – ${label}`;
+    }
+    title += ` – ${datePart} ${timePart}`;
 
-        const filenameSafe = title.replace(/[^\w\- ()]/g, "_");
+    const filenameSafe = title.replace(/[^\w\- ()]/g, "_");
 
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `${filenameSafe}.webm`;
-        link.textContent = title;
-        link.style.display = "block";
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${filenameSafe}.webm`;
+    link.textContent = title;
+    link.style.display = "block";
 
-        recordingsContainer.innerHTML = "";
-        recordingsContainer.appendChild(link);
+    recordingsContainer.innerHTML = "";
+    recordingsContainer.appendChild(link);
 
-        if (takeLabelInput) {
-            takeLabelInput.value = "";
-        }
+    if (takeLabelInput) {
+        takeLabelInput.value = "";
+    }
 
-        // Save metadata + audio to Band Workspace
-        const reader = new FileReader();
-        reader.onloadend = () => {
-            const audioDataUrl = reader.result;
-            saveRecordingMetadataToWorkspace(roomName, bpmValue, label, now.getTime(), audioDataUrl);
-        };
-        reader.readAsDataURL(blob);
-        setSessionState(SessionState.IDLE);
+    const reader = new FileReader();
+    reader.onloadend = () => {
+        const audioDataUrl = reader.result;
+        saveRecordingMetadataToWorkspace(roomName, bpmValue, label, now.getTime(), audioDataUrl);
     };
+    reader.readAsDataURL(blob);
+
+    // Back to idle
+    setSessionState(SessionState.IDLE, { recorderId: null });
+}
 
 // ========= UI EVENT HANDLERS =========
 startButton.addEventListener("click", async () => {
@@ -1577,12 +1430,10 @@ metronomeButton.addEventListener("click", () => {
 });
 
 recordButton.addEventListener("click", async () => {
-    // 1) Make sure AudioContext exists
+    // 1) Make sure AudioContext exists & is resumed
     if (!audioContext) {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
     }
-
-    // 2) Explicitly resume in direct response to the click
     if (audioContext.state === "suspended" && audioContext.resume) {
         try {
             await audioContext.resume();
@@ -1591,14 +1442,21 @@ recordButton.addEventListener("click", async () => {
         }
     }
 
-    // 3) Handle recording state
+    // 2) Handle by session state
     if (sessionState === SessionState.IDLE) {
-        // NO debugBeep here anymore
+        // Start a new recording flow (count-in → recording)
         beginRecordFlow();
-    } else if (sessionState === SessionState.RECORDING || sessionState === SessionState.SAVING) {
+    } else if (
+        sessionState === SessionState.COUNT_IN ||
+        sessionState === SessionState.RECORDING
+    ) {
+        // Allow the recorder to stop/cancel
         if (recorderId === myUserId) {
             stopRecordingFlow();
         }
+    } else if (sessionState === SessionState.SAVING) {
+        // Do nothing; saving in progress
+        console.log("Ignoring record click during SAVING state");
     }
 });
 
@@ -1630,10 +1488,8 @@ tabButtons.forEach((btn) => {
 
 async function beginRecordFlow() {
     try {
-        // 1) Make sure audio graph + mic are ready
         await getLocalStream();
 
-        // 2) Ensure audioContext exists and is running
         if (!audioContext) {
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
         }
@@ -1641,49 +1497,36 @@ async function beginRecordFlow() {
             await audioContext.resume();
         }
 
-        // 3) Read BPM and time signature from the UI
         const bpmVal = parseInt(bpmInput && bpmInput.value, 10) || 120;
         const beatsPerBar = parseInt(timeSignatureSelect && timeSignatureSelect.value, 10) || 4;
 
-        const beatMs = 60000 / bpmVal;
-        const totalMs = beatMs * beatsPerBar;
+        console.log("beginRecordFlow: bpm =", bpmVal, "beatsPerBar =", beatsPerBar);
 
-        console.log("beginRecordFlow: starting count-in",
-            { bpmVal, beatsPerBar, beatMs, totalMs });
+        // 👉 Arm recording: COUNT_IN state, recorderId = me
+        setSessionState(SessionState.COUNT_IN, { recorderId: myUserId });
 
-        // 4) Move into COUNT_IN state (for UI/mixer lock)
-        if (typeof setSessionState === "function" && SessionState && SessionState.COUNT_IN) {
-            setSessionState(SessionState.COUNT_IN, { recorderId: myUserId });
-        }
-
-        // 5) Fire one beep per beat using the SAME working debugBeep
-        for (let i = 0; i < beatsPerBar; i++) {
-            const delay = i * beatMs;
-            setTimeout(() => {
-                console.log("count-in beat", i + 1, "of", beatsPerBar);
-                // This is the EXACT beep you already hear from the button
-                debugBeep("count-in beat " + (i + 1));
-            }, delay);
-        }
-
-        // 6) After the final beat, actually start recording
-        setTimeout(() => {
-            console.log("beginRecordFlow: count-in done, starting recording");
-            startRecording(); // should call setSessionState(SessionState.RECORDING, ...)
-        }, totalMs + 100);
+        simpleCountIn(bpmVal, beatsPerBar, () => {
+            // Only start if we're still in COUNT_IN and I'm still the recorder
+            if (sessionState === SessionState.COUNT_IN && recorderId === myUserId) {
+                console.log("beginRecordFlow: count-in complete, starting recording");
+                startRecordingFlow();
+            } else {
+                console.log("beginRecordFlow: count-in complete but state/recorder changed; not recording");
+            }
+        });
 
     } catch (e) {
         console.error("Could not start recording:", e);
-        if (typeof setSessionState === "function" && SessionState && SessionState.IDLE) {
-            setSessionState(SessionState.IDLE);
-        }
+        setSessionState(SessionState.IDLE, { recorderId: null });
     }
 }
 
 function stopRecordingFlow() {
-  // Go to SAVING first
-  setSessionState(SessionState.SAVING);
-  stopRecording(); // your existing function (triggers mediaRecorder.onstop)
+    // Move to SAVING state *immediately* so UI locks, even if MediaRecorder is still finishing
+    setSessionState(SessionState.SAVING, { recorderId: recorderId || myUserId });
+
+    // Actually stop the MediaRecorder / backing playback
+    stopRecording();
 }
 
 remoteVolumeSlider.addEventListener("input", () => {
