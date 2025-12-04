@@ -310,82 +310,57 @@ function updateLatencyStats() {
         `Jitter: ${jitter.toFixed(1)} ms (${latencySamples.length} samples)`;
 }
 
-const BAND_WORKSPACE_KEY = "rehearsalSpaceBandWorkspace";
+// ========= RECORDINGS STORAGE =========
 
-function getBandWorkspace() {
+const RECORDINGS_KEY = "rehearsalSpaceRecordings";
+
+function getRecordingsStore() {
     try {
-        const raw = localStorage.getItem(BAND_WORKSPACE_KEY);
-        if (!raw) {
-            return {
-                bandName: "",
-                recordings: [],
-                ideas: []
-            };
-        }
+        const raw = localStorage.getItem(RECORDINGS_KEY);
+        if (!raw) return [];
+
         const data = JSON.parse(raw);
-
-        // Normalize shape
-        if (!data || typeof data !== "object") {
-            return {
-                bandName: "",
-                recordings: [],
-                ideas: []
-            };
-        }
-        if (!Array.isArray(data.recordings)) data.recordings = [];
-        if (!Array.isArray(data.ideas)) data.ideas = [];
-        if (typeof data.bandName !== "string") data.bandName = "";
-
-        return data;
+        return Array.isArray(data) ? data : [];
     } catch (e) {
-        console.warn("getBandWorkspace: failed to parse localStorage:", e);
-        return {
-            bandName: "",
-            recordings: [],
-            ideas: []
-        };
+        console.warn("getRecordingsStore: failed to parse localStorage:", e);
+        return [];
     }
 }
 
-function saveBandWorkspace(data) {
+function saveRecordingsStore(list) {
     try {
-        localStorage.setItem(BAND_WORKSPACE_KEY, JSON.stringify(data));
+        localStorage.setItem(RECORDINGS_KEY, JSON.stringify(list));
     } catch (e) {
-        console.warn("saveBandWorkspace: failed to write localStorage:", e);
+        console.warn("saveRecordingsStore: failed to write localStorage:", e);
     }
 }
 
-function saveRecordingMetadataToWorkspace(roomName, bpmValue, label, timestampMs, audioDataUrl) {
-    try {
-        const data = getBandWorkspace();
+function saveRecordingToStore(roomName, bpmValue, label, timestampMs, audioDataUrl) {
+    const recordings = getRecordingsStore();
 
-        data.recordings.push({
-            roomId: roomName || "Untitled room",
-            bpm: bpmValue || null,
-            label: label || "",
-            timestamp: timestampMs || Date.now(),
-            audioDataUrl: audioDataUrl || null
-        });
+    recordings.push({
+        roomId: roomName || "Untitled room",
+        bpm: bpmValue || null,
+        label: label || "",
+        timestamp: timestampMs || Date.now(),
+        audioDataUrl: audioDataUrl || null
+    });
 
-        saveBandWorkspace(data);
-        console.log("Saved recording to Band Workspace:", {
-            roomId: roomName,
-            bpm: bpmValue,
-            label,
-            timestamp: timestampMs
-        });
-    } catch (e) {
-        console.warn("Failed to save recording metadata to Band Workspace", e);
-    }
+    saveRecordingsStore(recordings);
+    console.log("Saved recording:", {
+        roomId: roomName,
+        bpm: bpmValue,
+        label,
+        timestamp: timestampMs
+    });
 }
 
-function loadBandWorkspaceRecordings() {
+function loadRecordingsList() {
     if (!recordingsListContainer) return;
 
     recordingsListContainer.innerHTML = "";
 
-    const data = getBandWorkspace();
-    const recordings = Array.isArray(data.recordings) ? data.recordings : [];
+    const recordings = getRecordingsStore();
 
     if (!recordings.length) {
         const empty = document.createElement("div");
@@ -413,7 +388,9 @@ function loadBandWorkspaceRecordings() {
         title.style.fontSize = "13px";
         title.style.fontWeight = "500";
 
-        const label = rec.label && rec.label.trim() ? rec.label.trim() : `Take ${recordings.length - index}`;
+        const label = rec.label && rec.label.trim()
+            ? rec.label.trim()
+            : `Take ${recordings.length - index}`;
         title.textContent = label;
 
         const meta = document.createElement("div");
@@ -476,7 +453,7 @@ function loadBandWorkspaceRecordings() {
                 roomId: rec.roomId || null
             };
 
-            console.log("Backing track set from recordings tab:", backingTrackConfig);
+            console.log("Backing track set from recordings list:", backingTrackConfig);
             updateBackingUI();
 
             const recordingCard = document.querySelector(".card-recording");
@@ -496,21 +473,17 @@ function loadBandWorkspaceRecordings() {
             if (!ok) return;
 
             try {
-                const data2 = getBandWorkspace();
-                if (!Array.isArray(data2.recordings)) {
-                    data2.recordings = [];
-                }
+                const current = getRecordingsStore();
 
-                data2.recordings = data2.recordings.filter((r) => {
+                const filtered = current.filter((r) => {
                     const sameTimestamp = r.timestamp === rec.timestamp;
                     const sameRoom = (r.roomId || "") === (rec.roomId || "");
                     const sameLabel = (r.label || "") === (rec.label || "");
                     return !(sameTimestamp && sameRoom && sameLabel);
                 });
 
-                saveBandWorkspace(data2);
+                saveRecordingsStore(filtered);
 
-                // If this was the current backing track, clear it
                 if (
                     backingTrackConfig &&
                     backingTrackConfig.audioDataUrl &&
@@ -521,7 +494,7 @@ function loadBandWorkspaceRecordings() {
                     updateBackingUI();
                 }
 
-                loadBandWorkspaceRecordings();
+                loadRecordingsList();
             } catch (e) {
                 console.warn("Failed to delete recording:", e);
                 alert("Could not delete this recording. Check the console for details.");
@@ -620,20 +593,6 @@ function updateBackingUI() {
         }
     }
 }
-
-// Receive backing track from Band Workspace (iframe parent)
-window.addEventListener("message", (event) => {
-    const msg = event.data;
-    if (!msg || msg.type !== "rehearsal-space:set-backing") return;
-
-    backingTrackConfig = msg.backing || null;
-    backingAudioElement = null;
-    backingSourceNode = null;
-    backingConnected = false;
-
-    console.log("Received backing track config:", backingTrackConfig);
-    updateBackingUI();
-});
 
 // ========= RECORDING HELPERS =========
 function setSessionState(newState, opts = {}) {
@@ -1349,7 +1308,7 @@ function handleRecordingFinished() {
     const reader = new FileReader();
     reader.onloadend = () => {
         const audioDataUrl = reader.result;
-        saveRecordingMetadataToWorkspace(roomName, bpmValue, label, now.getTime(), audioDataUrl);
+        saveRecordingToStore(roomName, bpmValue, label, now.getTime(), audioDataUrl);
     };
     reader.readAsDataURL(blob);
 
@@ -1481,7 +1440,7 @@ tabButtons.forEach((btn) => {
 
         // If we switched to the Recordings tab, refresh the list
         if (target === "recordings") {
-            loadBandWorkspaceRecordings();
+            loadRecordingsList();
         }
     });
 });
@@ -1581,4 +1540,4 @@ updateLatencyStats();
 updateAudioStatus();
 
 // Preload recordings list once (so it's ready the first time user clicks the tab)
-loadBandWorkspaceRecordings();
+loadRecordingsList();
