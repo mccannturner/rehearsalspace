@@ -1313,7 +1313,7 @@ function startRecording() {
                 });
             }
             console.log("🎵 Backing track started");
-        }, 50); // 50ms delay - adjust if needed
+        }, 100); // 100ms delay - adjust if needed
     }
 }
 
