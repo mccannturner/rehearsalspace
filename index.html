@@ -488,23 +488,61 @@
     display: block;
 }
 
-        @media (max-width: 900px) {
-            main {
-                padding: 16px;
-            }
-            .layout {
-                grid-template-columns: 1fr;
-                grid-template-rows: auto;
-            }
-            .card-room,
-            .card-chat,
-            .card-metronome,
-            .card-recording,
-            .card-mixer {
-                grid-column: 1 / 2;
-                grid-row: auto;
-            }
-        }
+@media (max-width: 900px) {
+    main {
+        padding: 16px;
+    }
+
+    .layout {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto;
+    }
+
+    .card-room,
+    .card-recording,
+    .card-tabs {
+        grid-column: 1 / 2;
+        grid-row: auto;
+    }
+
+    /* Tab bar: bigger tap targets on mobile */
+    #tab-bar {
+        display: flex;
+        gap: 6px;
+        margin-top: 8px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    #tab-bar button {
+        flex: 1;
+        padding: 10px 0;
+        font-size: 13px;
+        text-align: center;
+        white-space: nowrap;
+    }
+
+    /* Recording card: less cramped on small screens */
+    .card-recording .section-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 4px;
+    }
+
+    .card-recording #record {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .card-recording input[type="text"] {
+        width: 100%;
+    }
+
+    /* Make text areas in tabs breathe a bit more */
+    .tab-panel {
+        margin-top: 8px;
+    }
+}
 
         /* Splash screen */
         #splash {
