@@ -231,7 +231,19 @@
             font-size: 11px;
             color: var(--text-muted);
         }
+.band-section-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #888888;
+    margin-bottom: 4px;
+}
 
+.band-room-name {
+    font-size: 13px;
+    font-weight: 500;
+}
         /* Chat */
         #chat-messages {
             border-radius: 10px;
@@ -757,58 +769,54 @@
     </div>
 
     <!-- BAND TAB -->
-    <div class="tab-panel" data-tab="band">
-      <div class="card-header">
-        <div class="card-title">
-          <span class="icon-title">
-            <!-- Band icon -->
-            <svg width="18" height="18" viewBox="0 0 24 24"
-                 fill="none" stroke="#2C2C2E" stroke-width="1.75"
-                 stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="9" cy="8" r="3"/>
-              <circle cx="15" cy="8" r="3"/>
-              <path d="M4 20c0-3 2-5 5-5"/>
-              <path d="M20 20c0-3-2-5-5-5"/>
-            </svg>
-            Band
-          </span>
+<div class="tab-panel" data-tab="band">
+  <div class="section-column" style="gap: 12px;">
+
+    <!-- Room & status -->
+    <div>
+      <div class="band-section-title">Room</div>
+      <div id="room-status" class="band-room-name">Not in a room</div>
+    </div>
+
+    <!-- Latency & audio health -->
+    <div>
+      <div class="band-section-title">Connection</div>
+      <div class="latency-row">
+        <div id="latency-display">Latency: -- (waiting for other users)</div>
+        <div class="status-pill" id="audio-status-pill">
+          <span class="status-dot" id="audio-status-dot"></span>
+          <span id="audio-status-text">Not in room</span>
         </div>
-        <div class="card-subtitle">Who's here & how to invite them</div>
       </div>
 
-      <div class="section-column">
-        <div class="latency-row">
-          <div id="latency-display">Latency: -- (waiting for other users)</div>
-          <div class="status-pill" id="audio-status-pill">
-            <span class="status-dot" id="audio-status-dot"></span>
-            <span id="audio-status-text">Not in room</span>
-          </div>
-        </div>
-
-        <div class="latency-debug">
-          <div class="small-label">Latency debug</div>
-          <div id="latency-stats">
-            Avg: -- ms · Min: -- · Max: -- · Jitter: -- ms (0 samples)
-          </div>
-        </div>
-
-        <div style="margin-top: 10px;">
-          <div class="small-label">Users in this room:</div>
-          <ul id="user-list"></ul>
-        </div>
-
-        <div style="margin-top: 12px;">
-          <div class="small-label">Invite your band:</div>
-          <div class="section-row" style="margin-top: 4px;">
-            <input id="invite-link" type="text" readonly placeholder="Join a room to get an invite link">
-            <button id="invite-copy" class="secondary">Copy link</button>
-          </div>
-          <div id="invite-copied" class="small-label" style="display:none; margin-top:4px;">
-            ✅ Link copied!
-          </div>
+      <div class="latency-debug">
+        <div class="small-label">Latency details</div>
+        <div id="latency-stats">
+          Avg: -- ms · Min: -- · Max: -- · Jitter: -- ms (0 samples)
         </div>
       </div>
     </div>
+
+    <!-- Users -->
+    <div>
+      <div class="band-section-title">In this room</div>
+      <ul id="user-list"></ul>
+    </div>
+
+    <!-- Invite -->
+    <div>
+      <div class="band-section-title">Invite your band</div>
+      <div class="section-row" style="margin-top: 4px;">
+        <input id="invite-link" type="text" readonly placeholder="Join a room to get an invite link">
+        <button id="invite-copy" class="secondary">Copy link</button>
+      </div>
+      <div id="invite-copied" class="small-label" style="display:none; margin-top:4px;">
+        ✅ Link copied!
+      </div>
+    </div>
+
+  </div>
+</div>
 
     <!-- MIXER TAB -->
     <div class="tab-panel" data-tab="mixer">
