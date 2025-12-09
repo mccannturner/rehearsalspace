@@ -874,11 +874,6 @@ async function getLocalStream() {
 
         localSource = audioContext.createMediaStreamSource(localStream);
 
-        // We removed mic self-monitoring (no more delayed "my mic monitor"),
-        // so we ONLY route the mic into the recording destination.
-        recordDestination = audioContext.createMediaStreamDestination();
-        localSource.connect(recordDestination);
-
         // ✅ NEW: refresh audio status now that mic is live
         updateAudioStatus();
 
@@ -1255,11 +1250,16 @@ function startRecordingFlow() {
 }
 
 function startRecording() {
-    if (!recordDestination) {
+    if (!audioContext || !localSource) {
         alert("Audio graph not ready yet.");
         return;
     }
     if (mediaRecorder && mediaRecorder.state === "recording") return;
+
+    // 🔑 KEY FIX: Create a FRESH recordDestination right now
+    // This ensures we only capture audio from THIS moment forward
+    recordDestination = audioContext.createMediaStreamDestination();
+    localSource.connect(recordDestination);
 
     recordedChunks = [];
     mediaRecorder = new MediaRecorder(recordDestination.stream);
@@ -1281,11 +1281,6 @@ function startRecording() {
         useBackingCheckbox &&
         useBackingCheckbox.checked
     ) {
-        if (!audioContext) {
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            audioContext.resume();
-        }
-
         if (!backingAudioElement) {
             backingAudioElement = new Audio();
             backingAudioElement.src = backingTrackConfig.audioDataUrl;
@@ -1294,7 +1289,7 @@ function startRecording() {
             backingAudioElement.currentTime = 0;
         }
 
-        if (audioContext && recordDestination && !backingConnected) {
+        if (!backingConnected) {
             try {
                 backingSourceNode = audioContext.createMediaElementSource(backingAudioElement);
                 backingSourceNode.connect(audioContext.destination);
@@ -1306,7 +1301,7 @@ function startRecording() {
             }
         }
 
-const playPromise = backingAudioElement.play();
+        const playPromise = backingAudioElement.play();
         if (playPromise && playPromise.catch) {
             playPromise
                 .then(() => {
@@ -1330,7 +1325,6 @@ const playPromise = backingAudioElement.play();
         mediaRecorder.start();
         console.log("⏺️ MediaRecorder started WITHOUT backing track, state =", mediaRecorder.state);
     }
-    // ================================================
 }
 
 function stopRecording() {
