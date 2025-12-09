@@ -296,7 +296,42 @@
         #recordings a:hover {
             text-decoration: underline;
         }
+        .recording-banner {
+    margin-top: 8px;
+    font-size: 11px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
 
+.recording-banner-idle {
+    background: #F5F5F7;
+    color: #555555;
+}
+
+.recording-banner-armed {
+    background: #FFF4E5;
+    color: #8A4B00;
+}
+
+.recording-banner-live {
+    background: #FDECEA;
+    color: #D64545;
+}
+
+.recording-banner-saving {
+    background: #E7F3FF;
+    color: #1A4FA3;
+}
+
+.recording-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+}
         /* Latency */
         .latency-row {
             display: flex;
@@ -666,6 +701,12 @@
   </div>
 
   <div id="recordings"></div>
+
+  <!-- Global recording state banner -->
+  <div id="recording-banner" class="recording-banner recording-banner-idle">
+    <span class="recording-dot"></span>
+    Session idle. Ready to record.
+  </div>
 </div> <!-- ✅ recording card ends here -->
 
 

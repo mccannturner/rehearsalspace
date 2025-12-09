@@ -53,6 +53,7 @@ const muteRemoteCheckbox = document.getElementById("mute-remote");
 const userMixerContainer = document.getElementById("user-mixer");
 
 const recordingsListContainer = document.getElementById("recordings-list");
+const recordingBanner = document.getElementById("recording-banner");
 
 // ========= SIGNALING / ROOM STATE =========
 const serverUrl =
@@ -606,9 +607,39 @@ function setSessionState(newState, opts = {}) {
 
     updateRecordingButtonForState();
     applyLockStateForSession();
-    broadcastRecordingState(); // <- add this line
+    updateRecordingBanner();
 }
 
+function updateRecordingBanner() {
+    if (!recordingBanner) return;
+
+    const iAmRecorder = recorderId === myUserId;
+    let text = "";
+    let cls = "recording-banner";
+
+    if (sessionState === SessionState.IDLE) {
+        text = "Session idle. Ready to record.";
+        cls += " recording-banner-idle";
+    } else if (sessionState === SessionState.COUNT_IN) {
+        text = iAmRecorder
+            ? "Count-in… your take is about to start."
+            : "Count-in… a bandmate is about to start a take.";
+        cls += " recording-banner-armed";
+    } else if (sessionState === SessionState.RECORDING) {
+        text = iAmRecorder
+            ? "Recording in progress (you are recording)."
+            : "Recording in progress (bandmate is recording).";
+        cls += " recording-banner-live";
+    } else if (sessionState === SessionState.SAVING) {
+        text = iAmRecorder
+            ? "Saving your take…"
+            : "Saving the latest take…";
+        cls += " recording-banner-saving";
+    }
+
+    recordingBanner.className = cls;
+    recordingBanner.innerHTML = `<span class="recording-dot"></span>${text}`;
+}
 
 function broadcastRecordingState() {
   if (!socket || socket.readyState !== WebSocket.OPEN || !currentRoomId) return;
@@ -1541,3 +1572,6 @@ updateAudioStatus();
 
 // Preload recordings list once (so it's ready the first time user clicks the tab)
 loadRecordingsList();
+
+// Initialize recording banner
+updateRecordingBanner()
