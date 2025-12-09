@@ -1306,17 +1306,31 @@ function startRecording() {
             }
         }
 
-        const playPromise = backingAudioElement.play();
+const playPromise = backingAudioElement.play();
         if (playPromise && playPromise.catch) {
-            playPromise.catch((err) => {
-                console.warn("Backing track playback failed:", err);
-            });
+            playPromise
+                .then(() => {
+                    // Backing track started successfully - now start recording
+                    mediaRecorder.start();
+                    console.log("⏺️ MediaRecorder started WITH backing track, state =", mediaRecorder.state);
+                })
+                .catch((err) => {
+                    console.warn("Backing track playback failed:", err);
+                    // If backing fails, still start recording
+                    mediaRecorder.start();
+                    console.log("⏺️ MediaRecorder started (backing failed), state =", mediaRecorder.state);
+                });
+        } else {
+            // Fallback if playPromise doesn't exist
+            mediaRecorder.start();
+            console.log("⏺️ MediaRecorder started (no promise), state =", mediaRecorder.state);
         }
+    } else {
+        // No backing track selected - start recording immediately
+        mediaRecorder.start();
+        console.log("⏺️ MediaRecorder started WITHOUT backing track, state =", mediaRecorder.state);
     }
     // ================================================
-
-    mediaRecorder.start();
-    console.log("⏺️ MediaRecorder started, state =", mediaRecorder.state);
 }
 
 function stopRecording() {
