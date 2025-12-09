@@ -1256,8 +1256,7 @@ function startRecording() {
     }
     if (mediaRecorder && mediaRecorder.state === "recording") return;
 
-    // 🔑 KEY FIX: Create a FRESH recordDestination right now
-    // This ensures we only capture audio from THIS moment forward
+    // Create a fresh recordDestination
     recordDestination = audioContext.createMediaStreamDestination();
     localSource.connect(recordDestination);
 
@@ -1273,6 +1272,10 @@ function startRecording() {
     mediaRecorder.onstop = () => {
         handleRecordingFinished();
     };
+
+    // 🔑 KEY FIX: Start MediaRecorder FIRST, THEN start backing track
+    mediaRecorder.start();
+    console.log("⏺️ MediaRecorder started");
 
     // ==== Backing track: play & route into recording ====
     if (
@@ -1301,29 +1304,16 @@ function startRecording() {
             }
         }
 
-        const playPromise = backingAudioElement.play();
-        if (playPromise && playPromise.catch) {
-            playPromise
-                .then(() => {
-                    // Backing track started successfully - now start recording
-                    mediaRecorder.start();
-                    console.log("⏺️ MediaRecorder started WITH backing track, state =", mediaRecorder.state);
-                })
-                .catch((err) => {
+        // Small delay to ensure MediaRecorder is truly recording before backing starts
+        setTimeout(() => {
+            const playPromise = backingAudioElement.play();
+            if (playPromise && playPromise.catch) {
+                playPromise.catch((err) => {
                     console.warn("Backing track playback failed:", err);
-                    // If backing fails, still start recording
-                    mediaRecorder.start();
-                    console.log("⏺️ MediaRecorder started (backing failed), state =", mediaRecorder.state);
                 });
-        } else {
-            // Fallback if playPromise doesn't exist
-            mediaRecorder.start();
-            console.log("⏺️ MediaRecorder started (no promise), state =", mediaRecorder.state);
-        }
-    } else {
-        // No backing track selected - start recording immediately
-        mediaRecorder.start();
-        console.log("⏺️ MediaRecorder started WITHOUT backing track, state =", mediaRecorder.state);
+            }
+            console.log("🎵 Backing track started");
+        }, 50); // 50ms delay - adjust if needed
     }
 }
 
