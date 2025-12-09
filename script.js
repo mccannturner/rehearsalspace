@@ -1313,7 +1313,7 @@ function startRecording() {
                 });
             }
             console.log("🎵 Backing track started");
-        }, 100); // 100ms delay - adjust if needed
+        }, 150); // 150ms delay - adjust if needed
     }
 }
 
@@ -1348,25 +1348,43 @@ function handleRecordingFinished() {
 
     const filenameSafe = title.replace(/[^\w\- ()]/g, "_");
 
+    // Create download link
     const link = document.createElement("a");
     link.href = url;
     link.download = `${filenameSafe}.webm`;
-    link.textContent = title;
+    link.textContent = "⬇️ Download this take";
     link.style.display = "block";
+    link.style.marginBottom = "8px";
+
+    // Create "Save as backing track" button
+    const saveBtn = document.createElement("button");
+    saveBtn.textContent = "Save as backing track";
+    saveBtn.className = "secondary";
+    saveBtn.style.marginBottom = "8px";
+    
+    saveBtn.addEventListener("click", () => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            const audioDataUrl = reader.result;
+            try {
+                saveRecordingToStore(roomName, bpmValue, label, now.getTime(), audioDataUrl);
+                alert("Saved! You can now find this in the Recordings tab and use it as backing.");
+                loadRecordingsList(); // Refresh the recordings list
+            } catch (e) {
+                alert("Storage is full! You may need to delete some old recordings from the Recordings tab.");
+                console.error("Save failed:", e);
+            }
+        };
+        reader.readAsDataURL(blob);
+    });
 
     recordingsContainer.innerHTML = "";
     recordingsContainer.appendChild(link);
+    recordingsContainer.appendChild(saveBtn);
 
     if (takeLabelInput) {
         takeLabelInput.value = "";
     }
-
-    const reader = new FileReader();
-    reader.onloadend = () => {
-        const audioDataUrl = reader.result;
-        saveRecordingToStore(roomName, bpmValue, label, now.getTime(), audioDataUrl);
-    };
-    reader.readAsDataURL(blob);
 
     // Back to idle
     setSessionState(SessionState.IDLE, { recorderId: null });
