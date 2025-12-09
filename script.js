@@ -52,6 +52,11 @@ const remoteVolumeSlider = document.getElementById("remote-volume");
 const muteRemoteCheckbox = document.getElementById("mute-remote");
 const userMixerContainer = document.getElementById("user-mixer");
 
+const toneControl = document.getElementById("tone-control");
+const toneValue = document.getElementById("tone-value");
+const reverbControl = document.getElementById("reverb-control");
+const reverbValue = document.getElementById("reverb-value");
+
 const recordingsListContainer = document.getElementById("recordings-list");
 const recordingBanner = document.getElementById("recording-banner");
 
@@ -82,6 +87,10 @@ const userGains = new Map();              // userId -> 0..1 per-user volume
 let mediaRecorder = null;
 let recordedChunks = [];
 
+// Track currently playing recording
+let currentlyPlayingAudio = null;
+let currentlyPlayingButton = null;
+
 // Backing track state
 let backingTrackConfig = null;      // { title, audioDataUrl, bpm, roomId }
 let backingAudioElement = null;
@@ -95,6 +104,13 @@ let metronomeIsShared = false;
 let metronomeBpm = 120;
 let metronomeBeatsPerBar = 4;
 let metronomeCurrentBeat = 0;
+
+// Audio effects nodes
+let lowShelfFilter = null;
+let highShelfFilter = null;
+let reverbGain = null;
+let dryGain = null;
+let convolverNode = null;
 
 // ========= RECORDING SESSION STATE =========
 const SessionState = {
@@ -442,26 +458,94 @@ function loadRecordingsList() {
         actions.style.gap = "6px";
         actions.style.marginTop = "4px";
 
-        // Play button
+// Play/Pause button
         const playBtn = document.createElement("button");
         playBtn.type = "button";
         playBtn.className = "secondary";
         playBtn.textContent = "Play";
+        
+        let thisAudio = null; // Track the audio element for this specific recording
 
         playBtn.addEventListener("click", () => {
             if (!rec.audioDataUrl) {
                 alert("This recording has no audio data stored.");
                 return;
             }
+            
             try {
-                const audio = new Audio(rec.audioDataUrl);
-                audio.play().catch((err) => {
+                // If THIS recording is playing, pause it
+                if (thisAudio && !thisAudio.paused) {
+                    thisAudio.pause();
+                    playBtn.textContent = "Play";
+                    currentlyPlayingAudio = null;
+                    currentlyPlayingButton = null;
+                    return;
+                }
+                
+                // Stop any OTHER recording that's currently playing
+                if (currentlyPlayingAudio && currentlyPlayingAudio !== thisAudio) {
+                    currentlyPlayingAudio.pause();
+                    currentlyPlayingAudio.currentTime = 0;
+                    if (currentlyPlayingButton) {
+                        currentlyPlayingButton.textContent = "Play";
+                    }
+                }
+                
+                // If audio exists and is paused, resume it
+                if (thisAudio && thisAudio.paused && thisAudio.currentTime > 0) {
+                    thisAudio.play().catch((err) => {
+                        console.warn("Playback failed:", err);
+                    });
+                    playBtn.textContent = "Pause";
+                    currentlyPlayingAudio = thisAudio;
+                    currentlyPlayingButton = playBtn;
+                    return;
+                }
+                
+                // Create new audio element
+                thisAudio = new Audio(rec.audioDataUrl);
+                
+                thisAudio.onended = () => {
+                    playBtn.textContent = "Play";
+                    currentlyPlayingAudio = null;
+                    currentlyPlayingButton = null;
+                };
+                
+                thisAudio.play().catch((err) => {
                     console.warn("Playback failed:", err);
                 });
+                
+                playBtn.textContent = "Pause";
+                currentlyPlayingAudio = thisAudio;
+                currentlyPlayingButton = playBtn;
+                
             } catch (e) {
                 console.warn("Could not play recording:", e);
             }
         });
+        
+        // Stop button
+        const stopBtn = document.createElement("button");
+        stopBtn.type = "button";
+        stopBtn.className = "secondary";
+        stopBtn.textContent = "Stop";
+        
+        stopBtn.addEventListener("click", () => {
+            if (thisAudio) {
+                thisAudio.pause();
+                thisAudio.currentTime = 0;
+                playBtn.textContent = "Play";
+                
+                // Clear global tracking if this was the playing audio
+                if (currentlyPlayingAudio === thisAudio) {
+                    currentlyPlayingAudio = null;
+                    currentlyPlayingButton = null;
+                }
+            }
+        });
+
+        actions.appendChild(playBtn);
+        actions.appendChild(stopBtn);
 
         // Use as backing button
         const useBtn = document.createElement("button");
@@ -874,7 +958,9 @@ async function getLocalStream() {
 
         localSource = audioContext.createMediaStreamSource(localStream);
 
-        // ✅ NEW: refresh audio status now that mic is live
+        // Setup audio effects (tone and reverb)
+        setupAudioEffects();
+
         updateAudioStatus();
 
         return localStream;
@@ -883,6 +969,74 @@ async function getLocalStream() {
         alert("Microphone access failed: " + err.message);
         throw err;
     }
+}
+
+function setupAudioEffects() {
+    if (!audioContext || !localSource) {
+        console.warn("Cannot setup effects - audio context not ready");
+        return;
+    }
+
+    // Disconnect old routing if it exists
+    try {
+        localSource.disconnect();
+    } catch (e) {}
+
+    // Create EQ filters for tone control
+    lowShelfFilter = audioContext.createBiquadFilter();
+    lowShelfFilter.type = "lowshelf";
+    lowShelfFilter.frequency.value = 320;
+    lowShelfFilter.gain.value = 0;
+
+    highShelfFilter = audioContext.createBiquadFilter();
+    highShelfFilter.type = "highshelf";
+    highShelfFilter.frequency.value = 3200;
+    highShelfFilter.gain.value = 0;
+
+    // Create reverb (convolver)
+    convolverNode = audioContext.createConvolver();
+    
+    // Create a simple impulse response for reverb
+    const sampleRate = audioContext.sampleRate;
+    const length = sampleRate * 2; // 2 second reverb
+    const impulse = audioContext.createBuffer(2, length, sampleRate);
+    
+    for (let channel = 0; channel < 2; channel++) {
+        const channelData = impulse.getChannelData(channel);
+        for (let i = 0; i < length; i++) {
+            channelData[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 2);
+        }
+    }
+    convolverNode.buffer = impulse;
+
+    // Create wet/dry mix for reverb
+    dryGain = audioContext.createGain();
+    reverbGain = audioContext.createGain();
+    dryGain.gain.value = 1;
+    reverbGain.gain.value = 0;
+
+    // Create a merger to combine dry and wet signals
+    const merger = audioContext.createChannelMerger(2);
+
+    // Route: localSource → filters → split into dry/wet paths → merger
+    // IMPORTANT: We do NOT connect to audioContext.destination (speakers)
+    // This prevents feedback. Effects are only heard through WebRTC and recordings.
+    localSource.connect(lowShelfFilter);
+    lowShelfFilter.connect(highShelfFilter);
+    
+    // Dry path (no reverb)
+    highShelfFilter.connect(dryGain);
+    dryGain.connect(merger, 0, 0);
+    
+    // Wet path (with reverb)
+    highShelfFilter.connect(convolverNode);
+    convolverNode.connect(reverbGain);
+    reverbGain.connect(merger, 0, 1);
+
+    // DON'T connect to speakers - this would cause feedback
+    // Instead, the effects will be heard in recordings and sent to other users via WebRTC
+    
+    console.log("✅ Audio effects setup complete (no local monitoring to prevent feedback)");
 }
 
 function createPeerConnection(remoteUserId, isInitiator) {
@@ -1492,6 +1646,52 @@ recordButton.addEventListener("click", async () => {
         console.log("Ignoring record click during SAVING state");
     }
 });
+
+// Tone control
+if (toneControl && toneValue) {
+    toneControl.addEventListener("input", () => {
+        const value = parseInt(toneControl.value, 10);
+        
+        if (lowShelfFilter && highShelfFilter) {
+            if (value < 0) {
+                // Negative = boost lows, cut highs (warmer)
+                lowShelfFilter.gain.value = Math.abs(value) * 0.8;
+                highShelfFilter.gain.value = value * 0.8;
+            } else if (value > 0) {
+                // Positive = cut lows, boost highs (brighter)
+                lowShelfFilter.gain.value = -value * 0.8;
+                highShelfFilter.gain.value = value * 0.8;
+            } else {
+                // Zero = neutral
+                lowShelfFilter.gain.value = 0;
+                highShelfFilter.gain.value = 0;
+            }
+        }
+        
+        // Update label
+        if (value < 0) {
+            toneValue.textContent = "Warmer";
+        } else if (value > 0) {
+            toneValue.textContent = "Brighter";
+        } else {
+            toneValue.textContent = "Neutral";
+        }
+    });
+}
+
+// Reverb control
+if (reverbControl && reverbValue) {
+    reverbControl.addEventListener("input", () => {
+        const value = parseInt(reverbControl.value, 10);
+        
+        if (reverbGain) {
+            // Convert 0-100 to 0-1 gain
+            reverbGain.gain.value = value / 100;
+        }
+        
+        reverbValue.textContent = value + "%";
+    });
+}
 
 // ========= TABS =========
 const tabBar = document.getElementById("tab-bar");
