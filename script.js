@@ -999,13 +999,26 @@ async function getLocalStream() {
         setupAudioEffects();
 
         updateAudioStatus();
+        updateRecordButtonState(); // NEW: Update record button now that mic is ready
 
         return localStream;
     } catch (err) {
         console.error("Microphone access failed:", err);
         alert("Microphone access failed: " + err.message);
+        updateRecordButtonState(); // NEW: Update button to show no mic available
         throw err;
     }
+}
+
+function isMicReady() {
+    // Check if we have a local stream with active audio tracks
+    if (!localStream) return false;
+    
+    const audioTracks = localStream.getAudioTracks();
+    if (audioTracks.length === 0) return false;
+    
+    // Check if at least one track is live and enabled
+    return audioTracks.some(track => track.readyState === "live" && track.enabled);
 }
 
 function setupAudioEffects() {
@@ -1655,7 +1668,22 @@ metronomeButton.addEventListener("click", () => {
 });
 
 recordButton.addEventListener("click", async () => {
-    // 1) Make sure AudioContext exists & is resumed
+    // 1) Check if mic is ready FIRST
+    if (!isMicReady()) {
+        alert("Microphone not available. Please allow microphone access and try again.");
+        // Try to get mic access
+        try {
+            await getLocalStream();
+            if (!isMicReady()) {
+                return; // Still no mic after trying
+            }
+        } catch (e) {
+            console.error("Could not get microphone:", e);
+            return;
+        }
+    }
+    
+    // 2) Make sure AudioContext exists & is resumed
     if (!audioContext) {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
     }
@@ -1667,7 +1695,7 @@ recordButton.addEventListener("click", async () => {
         }
     }
 
-    // 2) Handle by session state
+    // 3) Handle by session state
     if (sessionState === SessionState.IDLE) {
         // Start a new recording flow (count-in → recording)
         beginRecordFlow();
@@ -1684,6 +1712,27 @@ recordButton.addEventListener("click", async () => {
         console.log("Ignoring record click during SAVING state");
     }
 });
+
+function updateRecordButtonState() {
+    if (!recordButton) return;
+    
+    // If we're in an active recording state, let the existing logic handle it
+    if (sessionState !== SessionState.IDLE) {
+        updateRecordingButtonForState();
+        return;
+    }
+    
+    // In IDLE state, check if mic is available
+    if (!isMicReady()) {
+        recordButton.disabled = true;
+        recordButton.textContent = "No Microphone";
+        recordButton.title = "Please allow microphone access to record";
+    } else {
+        recordButton.disabled = false;
+        recordButton.textContent = "Start Recording";
+        recordButton.title = "";
+    }
+}
 
 // Tone control
 if (toneControl && toneValue) {
@@ -1856,3 +1905,6 @@ loadRecordingsList();
 
 // Initialize recording banner
 updateRecordingBanner()
+
+// check mic status on load
+updateRecordButtonState();
