@@ -162,6 +162,28 @@ function updateRecordingButtonForState() {
     }
 }
 
+function isMediaRecorderSupported() {
+    return typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported;
+}
+
+function getSupportedMimeType() {
+    const types = [
+        'audio/webm',
+        'audio/webm;codecs=opus',
+        'audio/ogg;codecs=opus',
+        'audio/mp4',
+        'audio/mp4;codecs=mp4a'
+    ];
+    
+    for (const type of types) {
+        if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(type)) {
+            return type;
+        }
+    }
+    
+    return 'audio/webm'; // fallback
+}
+
 function setMixerLocked(locked) {
     if (remoteVolumeSlider) remoteVolumeSlider.disabled = locked;
     if (muteRemoteCheckbox) muteRemoteCheckbox.disabled = locked;
@@ -1459,6 +1481,14 @@ function startRecording() {
         alert("Audio graph not ready yet.");
         return;
     }
+    
+    // Check if MediaRecorder is supported
+    if (!isMediaRecorderSupported()) {
+        alert("Recording is not supported in this browser. Please try using Chrome, Edge, or a newer version of Safari.");
+        setSessionState(SessionState.IDLE, { recorderId: null });
+        return;
+    }
+    
     if (mediaRecorder && mediaRecorder.state === "recording") return;
 
     // Create a fresh recordDestination
@@ -1466,7 +1496,21 @@ function startRecording() {
     localSource.connect(recordDestination);
 
     recordedChunks = [];
-    mediaRecorder = new MediaRecorder(recordDestination.stream);
+    
+    // Use the supported mime type for this browser
+    const mimeType = getSupportedMimeType();
+    console.log("Using mime type:", mimeType);
+    
+    try {
+        mediaRecorder = new MediaRecorder(recordDestination.stream, {
+            mimeType: mimeType
+        });
+    } catch (e) {
+        console.error("Could not create MediaRecorder:", e);
+        alert("Recording failed to initialize. Please try a different browser.");
+        setSessionState(SessionState.IDLE, { recorderId: null });
+        return;
+    }
 
     mediaRecorder.ondataavailable = (event) => {
         if (event.data && event.data.size > 0) {
@@ -1478,7 +1522,7 @@ function startRecording() {
         handleRecordingFinished();
     };
 
-    // 🔑 KEY FIX: Start MediaRecorder FIRST, THEN start backing track
+    // Start MediaRecorder FIRST
     mediaRecorder.start();
     console.log("⏺️ MediaRecorder started");
 
@@ -1518,7 +1562,7 @@ function startRecording() {
                 });
             }
             console.log("🎵 Backing track started");
-        }, 150); // 150ms delay - adjust if needed
+        }, 150); // 150ms delay - your sweet spot
     }
 }
 
@@ -1534,7 +1578,19 @@ function stopRecording() {
 }
 
 function handleRecordingFinished() {
-    const blob = new Blob(recordedChunks, { type: "audio/webm" });
+    // Determine file extension based on what was recorded
+    let fileExtension = 'webm';
+    if (mediaRecorder && mediaRecorder.mimeType) {
+        if (mediaRecorder.mimeType.includes('mp4')) {
+            fileExtension = 'mp4';
+        } else if (mediaRecorder.mimeType.includes('ogg')) {
+            fileExtension = 'ogg';
+        }
+    }
+    
+    const blob = new Blob(recordedChunks, { 
+        type: mediaRecorder ? mediaRecorder.mimeType : 'audio/webm'
+    });
     const url = URL.createObjectURL(blob);
 
     const now = new Date();
@@ -1553,10 +1609,10 @@ function handleRecordingFinished() {
 
     const filenameSafe = title.replace(/[^\w\- ()]/g, "_");
 
-    // Create download link
+    // Create download link with correct extension
     const link = document.createElement("a");
     link.href = url;
-    link.download = `${filenameSafe}.webm`;
+    link.download = `${filenameSafe}.${fileExtension}`;
     link.textContent = "⬇️ Download this take";
     link.style.display = "block";
     link.style.marginBottom = "8px";
