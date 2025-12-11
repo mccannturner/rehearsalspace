@@ -19,6 +19,7 @@ const roomInput = document.getElementById("room");
 const startButton = document.getElementById("start");
 const roomStatus = document.getElementById("room-status");
 const userList = document.getElementById("user-list");
+const nicknameInput = document.getElementById("nickname");
 const latencyDisplay = document.getElementById("latency-display");
 const latencyStats = document.getElementById("latency-stats");
 
@@ -69,6 +70,9 @@ let socket = null;
 let currentRoomId = null;
 let myUserId = null;
 let usersInRoom = [];
+
+let myNickname = null;
+const userNicknames = new Map(); // userId -> nickname
 
 let pingIntervalId = null;
 let latencySamples = [];
@@ -211,7 +215,18 @@ function applyLockStateForSession() {
 }
 
 function createRandomUserId() {
-    return "user-" + Math.random().toString(36).slice(2, 10);
+    const randomPart = Math.random().toString(36).slice(2, 10);
+    return "user-" + randomPart;
+}
+
+function getUserNickname(userId) {
+    // If it's me, return my nickname or "You"
+    if (userId === myUserId) {
+        return myNickname || "You";
+    }
+    
+    // Look up nickname from our map
+    return userNicknames.get(userId) || userId;
 }
 
 function updateRoomStatus() {
@@ -236,7 +251,7 @@ function updateUserList() {
         return;
     }
 
-    // Put "You" first, then bandmates
+    // Put "You" first, then others
     const sorted = [...usersInRoom];
     sorted.sort((a, b) => {
         if (a === myUserId) return -1;
@@ -244,17 +259,9 @@ function updateUserList() {
         return 0;
     });
 
-    let bandmateNumber = 1;
-
     sorted.forEach((uid) => {
         const li = document.createElement("li");
-
-        if (uid === myUserId) {
-            li.textContent = "You";
-        } else {
-            li.textContent = `Bandmate ${bandmateNumber++}`;
-        }
-
+        li.textContent = getUserNickname(uid);
         userList.appendChild(li);
     });
 
@@ -268,14 +275,14 @@ function updateUserMixerUI() {
     userMixerContainer.innerHTML = "";
 
     usersInRoom.forEach((uid) => {
-        if (uid === myUserId) return; // don’t mix yourself here
+        if (uid === myUserId) return; // don't mix yourself here
 
         const row = document.createElement("div");
         row.className = "slider-row";
 
         const label = document.createElement("label");
         label.className = "small-label";
-        label.textContent = uid;
+        label.textContent = getUserNickname(uid);  // Changed from uid to nickname
 
         const slider = document.createElement("input");
         slider.type = "range";
@@ -838,7 +845,7 @@ function ensureSocket() {
         }
     };
 
-    socket.onmessage = (event) => {
+   socket.onmessage = (event) => {
         let msg;
         try {
             msg = JSON.parse(event.data);
@@ -850,14 +857,34 @@ function ensureSocket() {
         const { type } = msg;
 
         if (type === "room-users") {
-            usersInRoom = msg.users || [];
+            const usersData = msg.users || [];
+            usersInRoom = [];
+            
+            // Process user data with nicknames
+            usersData.forEach(userData => {
+                if (typeof userData === 'string') {
+                    // Old format: just userId
+                    usersInRoom.push(userData);
+                } else {
+                    // New format: { userId, nickname }
+                    usersInRoom.push(userData.userId);
+                    if (userData.nickname) {
+                        userNicknames.set(userData.userId, userData.nickname);
+                    }
+                }
+            });
+            
             console.log("Room users:", usersInRoom);
             updateUserList();
         } else if (type === "user-joined") {
-            const { userId } = msg;
-            console.log("User joined:", userId);
+            const { userId, nickname } = msg;
+            console.log("User joined:", userId, nickname);
+            
             if (!usersInRoom.includes(userId)) {
                 usersInRoom.push(userId);
+                if (nickname) {
+                    userNicknames.set(userId, nickname);
+                }
                 updateUserList();
             }
             if (userId !== myUserId) {
@@ -867,6 +894,7 @@ function ensureSocket() {
             const { userId } = msg;
             console.log("User left:", userId);
             usersInRoom = usersInRoom.filter((u) => u !== userId);
+            userNicknames.delete(userId); // Clean up nickname when user leaves
             updateUserList();
             teardownPeer(userId);
         } else if (type === "signal") {
@@ -912,10 +940,19 @@ function sendJoinMessage(roomId) {
     if (!myUserId) {
         myUserId = createRandomUserId();
     }
+    
+    // Get nickname from input, or use default
+    if (nicknameInput && nicknameInput.value.trim()) {
+        myNickname = nicknameInput.value.trim();
+    } else {
+        myNickname = "Anonymous";
+    }
+    
     const msg = {
         type: "join",
         roomId,
-        userId: myUserId
+        userId: myUserId,
+        nickname: myNickname  // Send nickname with join
     };
     console.log("🚪 Sending JOIN message:", msg);
     socket.send(JSON.stringify(msg));
@@ -1237,9 +1274,10 @@ function appendChatMessage(fromUserId, text, timestamp) {
     const div = document.createElement("div");
     const date = timestamp ? new Date(timestamp) : new Date();
     const timeStr = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    const isMe = fromUserId === myUserId;
+    
+    const displayName = getUserNickname(fromUserId);
 
-    div.textContent = `[${timeStr}] ${isMe ? "You" : fromUserId}: ${text}`;
+    div.textContent = `[${timeStr}] ${displayName}: ${text}`;
     chatMessages.appendChild(div);
     chatMessages.scrollTop = chatMessages.scrollHeight;
 }

@@ -76,27 +76,34 @@ wss.on("connection", (ws) => {
         const { type } = msg;
 
         // Client should send {type: "join", roomId, userId}
+// Client should send {type: "join", roomId, userId, nickname}
         if (type === "join") {
-            const { roomId, userId } = msg;
+            const { roomId, userId, nickname } = msg;
             ws.userId = userId;
             ws.roomId = roomId;
+            ws.nickname = nickname || "Anonymous"; // Store nickname on the socket
 
             const room = getOrCreateRoom(roomId);
             room.set(userId, ws);
 
-            // Send back current user list to the joining client
-            const users = Array.from(room.keys());
+            // Send back current user list with nicknames to the joining client
+            const users = Array.from(room.values()).map(socket => ({
+                userId: socket.userId,
+                nickname: socket.nickname
+            }));
+            
             ws.send(JSON.stringify({
                 type: "room-users",
                 roomId,
                 users
             }));
 
-            // Let others know someone joined
+            // Let others know someone joined (with their nickname)
             broadcastToRoom(roomId, {
                 type: "user-joined",
                 roomId,
-                userId
+                userId,
+                nickname: ws.nickname
             }, userId);
 
             return;
@@ -131,15 +138,29 @@ wss.on("connection", (ws) => {
             return;
         }
 
-        // Shared metronome: {type: "metronome", roomId, running, bpm, startTime}
+        // Shared metronome: {type: "metronome", roomId, running, bpm, timeSignature, startTime}
         if (type === "metronome") {
-            const { roomId, running, bpm, startTime } = msg;
+            const { roomId, running, bpm, timeSignature, startTime } = msg;
             broadcastToRoom(roomId, {
                 type: "metronome",
                 roomId,
                 running,
                 bpm,
+                timeSignature,
                 startTime
+            }, ws.userId);
+            return;
+        }
+
+// Recording state sync: {type: "recording-state", roomId, state, recorderId, timestamp}
+        if (type === "recording-state") {
+            const { roomId, state, recorderId, timestamp } = msg;
+            broadcastToRoom(roomId, {
+                type: "recording-state",
+                roomId,
+                state,
+                recorderId,
+                timestamp
             }, ws.userId);
             return;
         }
