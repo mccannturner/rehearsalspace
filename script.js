@@ -446,210 +446,242 @@ function loadRecordingsList() {
     // Newest first
     recordings.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
-    recordings.forEach((rec, index) => {
-        const row = document.createElement("div");
-        row.className = "section-row";
-        row.style.justifyContent = "space-between";
-        row.style.alignItems = "center";
-        row.style.flexWrap = "wrap";
+    // Group recordings by date + room
+    const groups = new Map(); // key: "2024-12-15 – Sunday Rehearsal", value: array of recordings
 
-        const info = document.createElement("div");
-        info.style.display = "flex";
-        info.style.flexDirection = "column";
-
-        const title = document.createElement("div");
-        title.style.fontSize = "13px";
-        title.style.fontWeight = "500";
-
-        const label = rec.label && rec.label.trim()
-            ? rec.label.trim()
-            : `Take ${recordings.length - index}`;
-        title.textContent = label;
-
-        const meta = document.createElement("div");
-        meta.className = "small-label";
-
-        const roomName = rec.roomId || "Unknown room";
-        const bpm = rec.bpm ? `${rec.bpm} BPM` : "BPM unknown";
-
+    recordings.forEach(rec => {
         const date = rec.timestamp ? new Date(rec.timestamp) : null;
-        const dateStr = date
-            ? date.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
-            : "Time unknown";
-
-        meta.textContent = `${roomName} • ${bpm} • ${dateStr}`;
-
-        info.appendChild(title);
-        info.appendChild(meta);
-
-        const actions = document.createElement("div");
-        actions.style.display = "flex";
-        actions.style.gap = "6px";
-        actions.style.marginTop = "4px";
-
-// Play/Pause button
-        const playBtn = document.createElement("button");
-        playBtn.type = "button";
-        playBtn.className = "secondary";
-        playBtn.textContent = "Play";
+        const dateStr = date ? date.toLocaleDateString('en-US', { 
+            month: 'short', 
+            day: 'numeric', 
+            year: 'numeric' 
+        }) : "Unknown date";
+        const roomName = rec.roomId || "Unknown room";
         
-        let thisAudio = null; // Track the audio element for this specific recording
+        const groupKey = `${dateStr} – ${roomName}`;
+        
+        if (!groups.has(groupKey)) {
+            groups.set(groupKey, []);
+        }
+        groups.get(groupKey).push(rec);
+    });
 
-        playBtn.addEventListener("click", () => {
-            if (!rec.audioDataUrl) {
-                alert("This recording has no audio data stored.");
-                return;
-            }
+    // Render each group
+    groups.forEach((groupRecordings, groupKey) => {
+        // Group header
+        const groupHeader = document.createElement("div");
+        groupHeader.style.fontSize = "13px";
+        groupHeader.style.fontWeight = "600";
+        groupHeader.style.marginTop = "16px";
+        groupHeader.style.marginBottom = "8px";
+        groupHeader.style.paddingBottom = "4px";
+        groupHeader.style.borderBottom = "1px solid var(--border)";
+        groupHeader.textContent = groupKey;
+        recordingsListContainer.appendChild(groupHeader);
+
+        // Render recordings in this group
+        groupRecordings.forEach((rec, index) => {
+            const row = document.createElement("div");
+            row.className = "section-row";
+            row.style.justifyContent = "space-between";
+            row.style.alignItems = "center";
+            row.style.flexWrap = "wrap";
+            row.style.paddingLeft = "8px";
+            row.style.marginBottom = "8px";
+
+            const info = document.createElement("div");
+            info.style.display = "flex";
+            info.style.flexDirection = "column";
+
+            const title = document.createElement("div");
+            title.style.fontSize = "13px";
+            title.style.fontWeight = "500";
+
+            const label = rec.label && rec.label.trim()
+                ? rec.label.trim()
+                : `Take ${groupRecordings.length - index}`;
+            title.textContent = label;
+
+            const meta = document.createElement("div");
+            meta.className = "small-label";
+
+            const bpm = rec.bpm ? `${rec.bpm} BPM` : "BPM unknown";
+            const date = rec.timestamp ? new Date(rec.timestamp) : null;
+            const timeStr = date
+                ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                : "Time unknown";
+
+            meta.textContent = `${bpm} • ${timeStr}`;
+
+            info.appendChild(title);
+            info.appendChild(meta);
+
+            const actions = document.createElement("div");
+            actions.style.display = "flex";
+            actions.style.gap = "6px";
+            actions.style.marginTop = "4px";
+
+            // Play/Pause button
+            const playBtn = document.createElement("button");
+            playBtn.type = "button";
+            playBtn.className = "secondary";
+            playBtn.textContent = "Play";
             
-            try {
-                // If THIS recording is playing, pause it
-                if (thisAudio && !thisAudio.paused) {
-                    thisAudio.pause();
-                    playBtn.textContent = "Play";
-                    currentlyPlayingAudio = null;
-                    currentlyPlayingButton = null;
+            let thisAudio = null;
+
+            playBtn.addEventListener("click", () => {
+                if (!rec.audioDataUrl) {
+                    alert("This recording has no audio data stored.");
                     return;
                 }
                 
-                // Stop any OTHER recording that's currently playing
-                if (currentlyPlayingAudio && currentlyPlayingAudio !== thisAudio) {
-                    currentlyPlayingAudio.pause();
-                    currentlyPlayingAudio.currentTime = 0;
-                    if (currentlyPlayingButton) {
-                        currentlyPlayingButton.textContent = "Play";
+                try {
+                    // If THIS recording is playing, pause it
+                    if (thisAudio && !thisAudio.paused) {
+                        thisAudio.pause();
+                        playBtn.textContent = "Play";
+                        currentlyPlayingAudio = null;
+                        currentlyPlayingButton = null;
+                        return;
                     }
-                }
-                
-                // If audio exists and is paused, resume it
-                if (thisAudio && thisAudio.paused && thisAudio.currentTime > 0) {
+                    
+                    // Stop any OTHER recording that's currently playing
+                    if (currentlyPlayingAudio && currentlyPlayingAudio !== thisAudio) {
+                        currentlyPlayingAudio.pause();
+                        currentlyPlayingAudio.currentTime = 0;
+                        if (currentlyPlayingButton) {
+                            currentlyPlayingButton.textContent = "Play";
+                        }
+                    }
+                    
+                    // If audio exists and is paused, resume it
+                    if (thisAudio && thisAudio.paused && thisAudio.currentTime > 0) {
+                        thisAudio.play().catch((err) => {
+                            console.warn("Playback failed:", err);
+                        });
+                        playBtn.textContent = "Pause";
+                        currentlyPlayingAudio = thisAudio;
+                        currentlyPlayingButton = playBtn;
+                        return;
+                    }
+                    
+                    // Create new audio element
+                    thisAudio = new Audio(rec.audioDataUrl);
+                    
+                    thisAudio.onended = () => {
+                        playBtn.textContent = "Play";
+                        currentlyPlayingAudio = null;
+                        currentlyPlayingButton = null;
+                    };
+                    
                     thisAudio.play().catch((err) => {
                         console.warn("Playback failed:", err);
                     });
+                    
                     playBtn.textContent = "Pause";
                     currentlyPlayingAudio = thisAudio;
                     currentlyPlayingButton = playBtn;
+                    
+                } catch (e) {
+                    console.warn("Could not play recording:", e);
+                }
+            });
+            
+            // Stop button
+            const stopBtn = document.createElement("button");
+            stopBtn.type = "button";
+            stopBtn.className = "secondary";
+            stopBtn.textContent = "Stop";
+            
+            stopBtn.addEventListener("click", () => {
+                if (thisAudio) {
+                    thisAudio.pause();
+                    thisAudio.currentTime = 0;
+                    playBtn.textContent = "Play";
+                    
+                    if (currentlyPlayingAudio === thisAudio) {
+                        currentlyPlayingAudio = null;
+                        currentlyPlayingButton = null;
+                    }
+                }
+            });
+
+            // Use as backing button
+            const useBtn = document.createElement("button");
+            useBtn.type = "button";
+            useBtn.textContent = "Use as backing";
+
+            useBtn.addEventListener("click", () => {
+                if (!rec.audioDataUrl) {
+                    alert("This recording has no audio data stored.");
                     return;
                 }
-                
-                // Create new audio element
-                thisAudio = new Audio(rec.audioDataUrl);
-                
-                thisAudio.onended = () => {
-                    playBtn.textContent = "Play";
-                    currentlyPlayingAudio = null;
-                    currentlyPlayingButton = null;
+
+                backingTrackConfig = {
+                    title: label,
+                    audioDataUrl: rec.audioDataUrl,
+                    bpm: rec.bpm || null,
+                    roomId: rec.roomId || null
                 };
-                
-                thisAudio.play().catch((err) => {
-                    console.warn("Playback failed:", err);
-                });
-                
-                playBtn.textContent = "Pause";
-                currentlyPlayingAudio = thisAudio;
-                currentlyPlayingButton = playBtn;
-                
-            } catch (e) {
-                console.warn("Could not play recording:", e);
-            }
-        });
-        
-        // Stop button
-        const stopBtn = document.createElement("button");
-        stopBtn.type = "button";
-        stopBtn.className = "secondary";
-        stopBtn.textContent = "Stop";
-        
-        stopBtn.addEventListener("click", () => {
-            if (thisAudio) {
-                thisAudio.pause();
-                thisAudio.currentTime = 0;
-                playBtn.textContent = "Play";
-                
-                // Clear global tracking if this was the playing audio
-                if (currentlyPlayingAudio === thisAudio) {
-                    currentlyPlayingAudio = null;
-                    currentlyPlayingButton = null;
+
+                console.log("Backing track set from recordings list:", backingTrackConfig);
+                updateBackingUI();
+
+                const recordingCard = document.querySelector(".card-recording");
+                if (recordingCard) {
+                    recordingCard.scrollIntoView({ behavior: "smooth", block: "start" });
                 }
-            }
-        });
+            });
 
-        actions.appendChild(playBtn);
-        actions.appendChild(stopBtn);
+            // Delete button
+            const deleteBtn = document.createElement("button");
+            deleteBtn.type = "button";
+            deleteBtn.className = "secondary";
+            deleteBtn.textContent = "Delete";
 
-        // Use as backing button
-        const useBtn = document.createElement("button");
-        useBtn.type = "button";
-        useBtn.textContent = "Use as backing";
+            deleteBtn.addEventListener("click", () => {
+                const ok = confirm(`Delete "${label}"? This cannot be undone.`);
+                if (!ok) return;
 
-        useBtn.addEventListener("click", () => {
-            if (!rec.audioDataUrl) {
-                alert("This recording has no audio data stored.");
-                return;
-            }
+                try {
+                    const current = getRecordingsStore();
 
-            backingTrackConfig = {
-                title: label,
-                audioDataUrl: rec.audioDataUrl,
-                bpm: rec.bpm || null,
-                roomId: rec.roomId || null
-            };
+                    const filtered = current.filter((r) => {
+                        const sameTimestamp = r.timestamp === rec.timestamp;
+                        const sameRoom = (r.roomId || "") === (rec.roomId || "");
+                        const sameLabel = (r.label || "") === (rec.label || "");
+                        return !(sameTimestamp && sameRoom && sameLabel);
+                    });
 
-            console.log("Backing track set from recordings list:", backingTrackConfig);
-            updateBackingUI();
+                    saveRecordingsStore(filtered);
 
-            const recordingCard = document.querySelector(".card-recording");
-            if (recordingCard) {
-                recordingCard.scrollIntoView({ behavior: "smooth", block: "start" });
-            }
-        });
+                    if (
+                        backingTrackConfig &&
+                        backingTrackConfig.audioDataUrl &&
+                        rec.audioDataUrl &&
+                        backingTrackConfig.audioDataUrl === rec.audioDataUrl
+                    ) {
+                        backingTrackConfig = null;
+                        updateBackingUI();
+                    }
 
-        // Delete button
-        const deleteBtn = document.createElement("button");
-        deleteBtn.type = "button";
-        deleteBtn.className = "secondary";
-        deleteBtn.textContent = "Delete";
-
-        deleteBtn.addEventListener("click", () => {
-            const ok = confirm(`Delete "${label}"? This cannot be undone.`);
-            if (!ok) return;
-
-            try {
-                const current = getRecordingsStore();
-
-                const filtered = current.filter((r) => {
-                    const sameTimestamp = r.timestamp === rec.timestamp;
-                    const sameRoom = (r.roomId || "") === (rec.roomId || "");
-                    const sameLabel = (r.label || "") === (rec.label || "");
-                    return !(sameTimestamp && sameRoom && sameLabel);
-                });
-
-                saveRecordingsStore(filtered);
-
-                if (
-                    backingTrackConfig &&
-                    backingTrackConfig.audioDataUrl &&
-                    rec.audioDataUrl &&
-                    backingTrackConfig.audioDataUrl === rec.audioDataUrl
-                ) {
-                    backingTrackConfig = null;
-                    updateBackingUI();
+                    loadRecordingsList();
+                } catch (e) {
+                    console.warn("Failed to delete recording:", e);
+                    alert("Could not delete this recording. Check the console for details.");
                 }
+            });
 
-                loadRecordingsList();
-            } catch (e) {
-                console.warn("Failed to delete recording:", e);
-                alert("Could not delete this recording. Check the console for details.");
-            }
+            actions.appendChild(playBtn);
+            actions.appendChild(stopBtn);
+            actions.appendChild(useBtn);
+            actions.appendChild(deleteBtn);
+
+            row.appendChild(info);
+            row.appendChild(actions);
+
+            recordingsListContainer.appendChild(row);
         });
-
-        actions.appendChild(playBtn);
-        actions.appendChild(useBtn);
-        actions.appendChild(deleteBtn);
-
-        row.appendChild(info);
-        row.appendChild(actions);
-
-        recordingsListContainer.appendChild(row);
     });
 }
 
