@@ -77,6 +77,182 @@ const userNicknames = new Map(); // userId -> nickname
 let pingIntervalId = null;
 let latencySamples = [];
 
+let wavRecorder = null;
+let recordingSources = [];
+
+// ========= WAV RECORDER CLASS =========
+class WAVRecorder {
+    constructor(audioContext, sources) {
+        this.audioContext = audioContext;
+        this.sources = sources; // Array of audio sources to mix
+        this.buffers = [];
+        this.isRecording = false;
+        this.processor = null;
+        this.mixerNode = null;
+    }
+
+    start() {
+        if (this.isRecording) return;
+        
+        this.buffers = [];
+        this.isRecording = true;
+
+        // Create a mixer node to combine all sources
+        this.mixerNode = this.audioContext.createGain();
+        this.mixerNode.gain.value = 1.0;
+
+        // Connect all sources to the mixer
+        this.sources.forEach(source => {
+            if (source && source.connect) {
+                try {
+                    source.connect(this.mixerNode);
+                } catch (e) {
+                    console.warn("Could not connect source to mixer:", e);
+                }
+            }
+        });
+
+        // Create script processor (4096 buffer size, 2 input channels, 2 output channels)
+        const bufferSize = 4096;
+        this.processor = this.audioContext.createScriptProcessor(bufferSize, 2, 2);
+
+        this.processor.onaudioprocess = (e) => {
+            if (!this.isRecording) return;
+
+            // Get audio data from input
+            const left = e.inputBuffer.getChannelData(0);
+            const right = e.inputBuffer.getChannelData(1);
+
+            // Clone the data (important - don't store references)
+            const leftCopy = new Float32Array(left);
+            const rightCopy = new Float32Array(right);
+
+            this.buffers.push({
+                left: leftCopy,
+                right: rightCopy
+            });
+        };
+
+        // Connect mixer → processor → destination
+        this.mixerNode.connect(this.processor);
+        this.processor.connect(this.audioContext.destination);
+
+        console.log("✅ WAV Recorder started");
+    }
+
+    stop() {
+        if (!this.isRecording) return;
+
+        this.isRecording = false;
+
+        // Disconnect everything
+        if (this.processor) {
+            this.processor.disconnect();
+            this.processor.onaudioprocess = null;
+        }
+
+        if (this.mixerNode) {
+            this.mixerNode.disconnect();
+        }
+
+        console.log("⏹️ WAV Recorder stopped, buffers collected:", this.buffers.length);
+
+        // Generate WAV file
+        return this.exportWAV();
+    }
+
+    exportWAV() {
+        if (!this.buffers.length) {
+            console.warn("No audio buffers to export");
+            return null;
+        }
+
+        const sampleRate = this.audioContext.sampleRate;
+        const numChannels = 2;
+
+        // Calculate total length
+        let totalLength = 0;
+        this.buffers.forEach(buf => {
+            totalLength += buf.left.length;
+        });
+
+        // Merge all buffers into single arrays
+        const leftChannel = new Float32Array(totalLength);
+        const rightChannel = new Float32Array(totalLength);
+
+        let offset = 0;
+        this.buffers.forEach(buf => {
+            leftChannel.set(buf.left, offset);
+            rightChannel.set(buf.right, offset);
+            offset += buf.left.length;
+        });
+
+        // Interleave left and right channels
+        const interleaved = new Float32Array(totalLength * 2);
+        for (let i = 0; i < totalLength; i++) {
+            interleaved[i * 2] = leftChannel[i];
+            interleaved[i * 2 + 1] = rightChannel[i];
+        }
+
+        // Convert to 16-bit PCM
+        const pcmData = this.floatTo16BitPCM(interleaved);
+
+        // Create WAV file
+        const wavBlob = this.createWAVBlob(pcmData, sampleRate, numChannels);
+
+        console.log("✅ WAV file created:", wavBlob.size, "bytes");
+        return wavBlob;
+    }
+
+    floatTo16BitPCM(float32Array) {
+        const int16Array = new Int16Array(float32Array.length);
+        for (let i = 0; i < float32Array.length; i++) {
+            let s = Math.max(-1, Math.min(1, float32Array[i]));
+            int16Array[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+        }
+        return int16Array;
+    }
+
+    createWAVBlob(pcmData, sampleRate, numChannels) {
+        const bytesPerSample = 2; // 16-bit
+        const blockAlign = numChannels * bytesPerSample;
+        const byteRate = sampleRate * blockAlign;
+        const dataSize = pcmData.length * bytesPerSample;
+
+        const buffer = new ArrayBuffer(44 + dataSize);
+        const view = new DataView(buffer);
+
+        // WAV header
+        this.writeString(view, 0, 'RIFF');
+        view.setUint32(4, 36 + dataSize, true);
+        this.writeString(view, 8, 'WAVE');
+        this.writeString(view, 12, 'fmt ');
+        view.setUint32(16, 16, true); // PCM format
+        view.setUint16(20, 1, true); // Audio format (1 = PCM)
+        view.setUint16(22, numChannels, true);
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, byteRate, true);
+        view.setUint16(32, blockAlign, true);
+        view.setUint16(34, 16, true); // Bits per sample
+        this.writeString(view, 36, 'data');
+        view.setUint32(40, dataSize, true);
+
+        // Write PCM data
+        const offset = 44;
+        for (let i = 0; i < pcmData.length; i++) {
+            view.setInt16(offset + i * 2, pcmData[i], true);
+        }
+
+        return new Blob([buffer], { type: 'audio/wav' });
+    }
+
+    writeString(view, offset, string) {
+        for (let i = 0; i < string.length; i++) {
+            view.setUint8(offset + i, string.charCodeAt(i));
+        }
+    }
+}
+
 // ========= WEBRTC / AUDIO STATE =========
 let localStream = null;
 let audioContext = null;
@@ -160,28 +336,6 @@ function updateRecordingButtonForState() {
         recordButton.disabled = true;
         recordButton.textContent = iAmRecorder ? "Saving take…" : "Saving recording…";
     }
-}
-
-function isMediaRecorderSupported() {
-    return typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported;
-}
-
-function getSupportedMimeType() {
-    const types = [
-        'audio/webm',
-        'audio/webm;codecs=opus',
-        'audio/ogg;codecs=opus',
-        'audio/mp4',
-        'audio/mp4;codecs=mp4a'
-    ];
-    
-    for (const type of types) {
-        if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(type)) {
-            return type;
-        }
-    }
-    
-    return 'audio/webm'; // fallback
 }
 
 function setMixerLocked(locked) {
@@ -1520,49 +1674,20 @@ function startRecording() {
         return;
     }
     
-    // Check if MediaRecorder is supported
-    if (!isMediaRecorderSupported()) {
-        alert("Recording is not supported in this browser. Please try using Chrome, Edge, or a newer version of Safari.");
-        setSessionState(SessionState.IDLE, { recorderId: null });
-        return;
-    }
-    
-    if (mediaRecorder && mediaRecorder.state === "recording") return;
-
-    // Create a fresh recordDestination for this recording
-    recordDestination = audioContext.createMediaStreamDestination();
-    
-    // Connect mic to recordDestination
-    localSource.connect(recordDestination);
-
-    recordedChunks = [];
-    
-    // Use the supported mime type for this browser
-    const mimeType = getSupportedMimeType();
-    console.log("Using mime type:", mimeType);
-    
-    try {
-        mediaRecorder = new MediaRecorder(recordDestination.stream, {
-            mimeType: mimeType
-        });
-    } catch (e) {
-        console.error("Could not create MediaRecorder:", e);
-        alert("Recording failed to initialize. Please try a different browser.");
-        setSessionState(SessionState.IDLE, { recorderId: null });
+    if (wavRecorder && wavRecorder.isRecording) {
+        console.warn("Already recording");
         return;
     }
 
-    mediaRecorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) {
-            recordedChunks.push(event.data);
-        }
-    };
+    // Build list of audio sources to record
+    recordingSources = [];
 
-    mediaRecorder.onstop = () => {
-        handleRecordingFinished();
-    };
+    // 1. Add microphone
+    if (localSource) {
+        recordingSources.push(localSource);
+    }
 
-    // ==== Backing track: play & route into recording ====
+    // 2. Add backing track if enabled
     if (
         backingTrackConfig &&
         backingTrackConfig.audioDataUrl &&
@@ -1577,39 +1702,21 @@ function startRecording() {
             backingAudioElement.currentTime = 0;
         }
 
-        // Connect backing track to BOTH speakers and recordDestination
-        if (!backingConnected) {
+        // Create/connect backing source
+        if (!backingSourceNode) {
             try {
                 backingSourceNode = audioContext.createMediaElementSource(backingAudioElement);
-                backingSourceNode.connect(audioContext.destination); // You hear it
-                backingSourceNode.connect(recordDestination);        // It gets recorded
-                backingConnected = true;
+                backingSourceNode.connect(audioContext.destination); // So you hear it
             } catch (e) {
-                console.warn("Could not connect backing track source (maybe already connected):", e);
-                // If already connected, just make sure it's connected to the new destination
-                if (backingSourceNode) {
-                    try {
-                        backingSourceNode.connect(recordDestination);
-                    } catch (err) {
-                        console.warn("Could not reconnect backing to new destination:", err);
-                    }
-                }
-                backingConnected = true;
-            }
-        } else {
-            // Already connected - just connect to the new recordDestination
-            try {
-                backingSourceNode.connect(recordDestination);
-            } catch (e) {
-                console.warn("Could not connect backing to new destination:", e);
+                console.warn("Could not create backing source:", e);
             }
         }
 
-        // Start MediaRecorder FIRST
-        mediaRecorder.start();
-        console.log("⏺️ MediaRecorder started");
+        if (backingSourceNode) {
+            recordingSources.push(backingSourceNode);
+        }
 
-        // Small delay to ensure MediaRecorder is truly recording before backing starts
+        // Start backing track with delay
         setTimeout(() => {
             const playPromise = backingAudioElement.play();
             if (playPromise && playPromise.catch) {
@@ -1619,38 +1726,50 @@ function startRecording() {
             }
             console.log("🎵 Backing track started");
         }, 150);
-    } else {
-        // No backing track - just start recording
-        mediaRecorder.start();
-        console.log("⏺️ MediaRecorder started WITHOUT backing track");
     }
+
+    // 3. TODO: Add remote peer audio sources when you have multiple users
+
+    // Create and start WAV recorder
+    wavRecorder = new WAVRecorder(audioContext, recordingSources);
+    wavRecorder.start();
+    
+    console.log("⏺️ WAV Recording started with", recordingSources.length, "sources");
 }
 
 function stopRecording() {
-    if (mediaRecorder && mediaRecorder.state === "recording") {
-        mediaRecorder.stop();  // triggers handleRecordingFinished()
+    if (!wavRecorder || !wavRecorder.isRecording) {
+        console.warn("Not currently recording");
+        return;
     }
 
+    // Stop backing track if playing
     if (backingAudioElement && !backingAudioElement.paused) {
         backingAudioElement.pause();
     }
-    console.log("⏹️ MediaRecorder stopped");
+
+    // Stop recorder and get WAV blob
+    const wavBlob = wavRecorder.stop();
+    
+    if (!wavBlob) {
+        alert("Recording failed - no audio data captured");
+        setSessionState(SessionState.IDLE, { recorderId: null });
+        return;
+    }
+
+    // Process the recording
+    handleRecordingFinished(wavBlob);
+    
+    console.log("⏹️ Recording stopped");
 }
 
-function handleRecordingFinished() {
-    // Determine file extension based on what was recorded
-    let fileExtension = 'webm';
-    if (mediaRecorder && mediaRecorder.mimeType) {
-        if (mediaRecorder.mimeType.includes('mp4')) {
-            fileExtension = 'mp4';
-        } else if (mediaRecorder.mimeType.includes('ogg')) {
-            fileExtension = 'ogg';
-        }
+function handleRecordingFinished(blob) {
+    if (!blob) {
+        console.error("No recording blob provided");
+        setSessionState(SessionState.IDLE, { recorderId: null });
+        return;
     }
-    
-    const blob = new Blob(recordedChunks, { 
-        type: mediaRecorder ? mediaRecorder.mimeType : 'audio/webm'
-    });
+
     const url = URL.createObjectURL(blob);
 
     const now = new Date();
@@ -1669,10 +1788,10 @@ function handleRecordingFinished() {
 
     const filenameSafe = title.replace(/[^\w\- ()]/g, "_");
 
-    // Create download link with correct extension
+    // Create download link - now with .wav extension
     const link = document.createElement("a");
     link.href = url;
-    link.download = `${filenameSafe}.${fileExtension}`;
+    link.download = `${filenameSafe}.wav`;
     link.textContent = "⬇️ Download this take";
     link.style.display = "block";
     link.style.marginBottom = "8px";
@@ -1690,7 +1809,7 @@ function handleRecordingFinished() {
             try {
                 saveRecordingToStore(roomName, bpmValue, label, now.getTime(), audioDataUrl);
                 alert("Saved! You can now find this in the Recordings tab and use it as backing.");
-                loadRecordingsList(); // Refresh the recordings list
+                loadRecordingsList();
             } catch (e) {
                 alert("Storage is full! You may need to delete some old recordings from the Recordings tab.");
                 console.error("Save failed:", e);
