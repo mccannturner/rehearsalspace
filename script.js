@@ -252,11 +252,17 @@ function getUserNickname(userId) {
 }
 
 function updateRoomStatus() {
-    if (!currentRoomId) {
-        roomStatus.textContent = "Not in a room";
-    } else {
-        roomStatus.textContent = `In room: ${currentRoomId}`;
-    }
+    // Update ALL room-status elements on the page
+    const roomStatusElements = document.querySelectorAll('#room-status');
+    
+    roomStatusElements.forEach(element => {
+        if (!currentRoomId) {
+            element.textContent = "Not in a room";
+        } else {
+            element.textContent = `In room: ${currentRoomId}`;
+        }
+    });
+    
     updateAudioStatus();
     updateInviteLink();
 }
@@ -1523,8 +1529,10 @@ function startRecording() {
     
     if (mediaRecorder && mediaRecorder.state === "recording") return;
 
-    // Create a fresh recordDestination
+    // Create a fresh recordDestination for this recording
     recordDestination = audioContext.createMediaStreamDestination();
+    
+    // Connect mic to recordDestination
     localSource.connect(recordDestination);
 
     recordedChunks = [];
@@ -1554,10 +1562,6 @@ function startRecording() {
         handleRecordingFinished();
     };
 
-    // Start MediaRecorder FIRST
-    mediaRecorder.start();
-    console.log("⏺️ MediaRecorder started");
-
     // ==== Backing track: play & route into recording ====
     if (
         backingTrackConfig &&
@@ -1573,17 +1577,37 @@ function startRecording() {
             backingAudioElement.currentTime = 0;
         }
 
+        // Connect backing track to BOTH speakers and recordDestination
         if (!backingConnected) {
             try {
                 backingSourceNode = audioContext.createMediaElementSource(backingAudioElement);
-                backingSourceNode.connect(audioContext.destination);
-                backingSourceNode.connect(recordDestination);
+                backingSourceNode.connect(audioContext.destination); // You hear it
+                backingSourceNode.connect(recordDestination);        // It gets recorded
                 backingConnected = true;
             } catch (e) {
                 console.warn("Could not connect backing track source (maybe already connected):", e);
+                // If already connected, just make sure it's connected to the new destination
+                if (backingSourceNode) {
+                    try {
+                        backingSourceNode.connect(recordDestination);
+                    } catch (err) {
+                        console.warn("Could not reconnect backing to new destination:", err);
+                    }
+                }
                 backingConnected = true;
             }
+        } else {
+            // Already connected - just connect to the new recordDestination
+            try {
+                backingSourceNode.connect(recordDestination);
+            } catch (e) {
+                console.warn("Could not connect backing to new destination:", e);
+            }
         }
+
+        // Start MediaRecorder FIRST
+        mediaRecorder.start();
+        console.log("⏺️ MediaRecorder started");
 
         // Small delay to ensure MediaRecorder is truly recording before backing starts
         setTimeout(() => {
@@ -1594,7 +1618,11 @@ function startRecording() {
                 });
             }
             console.log("🎵 Backing track started");
-        }, 150); // 150ms delay - your sweet spot
+        }, 150);
+    } else {
+        // No backing track - just start recording
+        mediaRecorder.start();
+        console.log("⏺️ MediaRecorder started WITHOUT backing track");
     }
 }
 
