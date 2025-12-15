@@ -1193,9 +1193,26 @@ function sendJoinMessage(roomId) {
 
 // ========= AUDIO / WEBRTC =========
 async function getLocalStream() {
-    if (localStream) return localStream;
+    if (localStream) {
+        console.log("Already have local stream");
+        return localStream;
+    }
 
     try {
+        // iOS Safari needs the AudioContext to be created/resumed BEFORE getUserMedia
+        if (!audioContext) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        
+        // Critical for iOS: Resume audio context first
+        if (audioContext.state === 'suspended') {
+            await audioContext.resume();
+            console.log("AudioContext resumed, state:", audioContext.state);
+        }
+
+        // Small delay for iOS to settle
+        await new Promise(resolve => setTimeout(resolve, 100));
+
         localStream = await navigator.mediaDevices.getUserMedia({
             audio: {
                 echoCancellation: false,
@@ -1206,24 +1223,32 @@ async function getLocalStream() {
         });
         console.log("🎙️ Microphone access granted");
 
-        if (!audioContext) {
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        }
-        await audioContext.resume();
-
         localSource = audioContext.createMediaStreamSource(localStream);
 
         // Setup audio effects (tone and reverb)
         setupAudioEffects();
 
         updateAudioStatus();
-        updateRecordButtonState(); // NEW: Update record button now that mic is ready
+        updateRecordButtonState();
 
         return localStream;
     } catch (err) {
         console.error("Microphone access failed:", err);
-        alert("Microphone access failed: " + err.message);
-        updateRecordButtonState(); // NEW: Update button to show no mic available
+        
+        // More helpful error messages
+        let errorMsg = "Microphone access failed: ";
+        if (err.name === 'NotAllowedError') {
+            errorMsg += "Please allow microphone access in Settings → Safari → [This Website] → Microphone";
+        } else if (err.name === 'NotFoundError') {
+            errorMsg += "No microphone found";
+        } else if (err.name === 'InvalidStateError') {
+            errorMsg += "Audio device error. Try refreshing the page.";
+        } else {
+            errorMsg += err.message;
+        }
+        
+        alert(errorMsg);
+        updateRecordButtonState();
         throw err;
     }
 }
@@ -1868,31 +1893,54 @@ function handleRecordingFinished(blob) {
 }
 
 // ========= UI EVENT HANDLERS =========
+let isJoining = false; // Add this flag
+
 startButton.addEventListener("click", async () => {
     console.log("Join Room button clicked");
+    
+    // Prevent double-clicks
+    if (isJoining) {
+        console.log("Already joining, ignoring click");
+        return;
+    }
+    
     const roomId = roomInput.value.trim();
     if (!roomId) {
         alert("Please enter a room name.");
         return;
     }
 
-    currentRoomId = roomId;
-    if (!myUserId) {
-        myUserId = createRandomUserId();
-    }
+    isJoining = true;
+    startButton.disabled = true;
+    startButton.textContent = "Joining...";
 
-    updateRoomStatus();
+    try {
+        currentRoomId = roomId;
+        if (!myUserId) {
+            myUserId = createRandomUserId();
+        }
 
-    await getLocalStream();
+        updateRoomStatus();
 
-    const ws = ensureSocket();
-    if (ws.readyState === WebSocket.OPEN) {
-        sendJoinMessage(roomId);
-    } else {
-        ws.addEventListener("open", function handleOpen() {
-            ws.removeEventListener("open", handleOpen);
+        await getLocalStream();
+
+        const ws = ensureSocket();
+        if (ws.readyState === WebSocket.OPEN) {
             sendJoinMessage(roomId);
-        });
+        } else {
+            ws.addEventListener("open", function handleOpen() {
+                ws.removeEventListener("open", handleOpen);
+                sendJoinMessage(roomId);
+            });
+        }
+        
+        startButton.textContent = "Joined";
+        
+    } catch (err) {
+        console.error("Failed to join room:", err);
+        startButton.disabled = false;
+        startButton.textContent = "Join Room";
+        isJoining = false;
     }
 });
 
