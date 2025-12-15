@@ -296,13 +296,6 @@ let metronomeBpm = 120;
 let metronomeBeatsPerBar = 4;
 let metronomeCurrentBeat = 0;
 
-// Audio effects nodes
-let lowShelfFilter = null;
-let highShelfFilter = null;
-let reverbGain = null;
-let dryGain = null;
-let convolverNode = null;
-
 // ========= RECORDING SESSION STATE =========
 const SessionState = {
     IDLE: "idle",
