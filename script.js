@@ -80,6 +80,17 @@ let latencySamples = [];
 let wavRecorder = null;
 let recordingSources = [];
 
+// Audio effects nodes
+let lowShelfFilter = null;
+let highShelfFilter = null;
+let reverbGain = null;
+let dryGain = null;
+let convolverNode = null;
+
+// Recording-specific nodes
+let recordingMixerNode = null;
+let micRecordingGain = null;
+
 // ========= WAV RECORDER CLASS =========
 class WAVRecorder {
     constructor(audioContext, sources) {
@@ -1282,9 +1293,11 @@ function setupAudioEffects() {
     // Create a merger to combine dry and wet signals
     const merger = audioContext.createChannelMerger(2);
 
+    // NEW: Create a gain node specifically for tapping audio for recording
+    micRecordingGain = audioContext.createGain();
+    micRecordingGain.gain.value = 1.0;
+
     // Route: localSource → filters → split into dry/wet paths → merger
-    // IMPORTANT: We do NOT connect to audioContext.destination (speakers)
-    // This prevents feedback. Effects are only heard through WebRTC and recordings.
     localSource.connect(lowShelfFilter);
     lowShelfFilter.connect(highShelfFilter);
     
@@ -1297,10 +1310,13 @@ function setupAudioEffects() {
     convolverNode.connect(reverbGain);
     reverbGain.connect(merger, 0, 1);
 
-    // DON'T connect to speakers - this would cause feedback
-    // Instead, the effects will be heard in recordings and sent to other users via WebRTC
+    // NEW: Also tap the processed audio for recording (after effects, before reverb decision)
+    highShelfFilter.connect(micRecordingGain);
+
+    // DON'T connect merger to speakers - this would cause feedback
+    // The micRecordingGain is available for recording though!
     
-    console.log("✅ Audio effects setup complete (no local monitoring to prevent feedback)");
+    console.log("✅ Audio effects setup complete with recording tap");
 }
 
 function createPeerConnection(remoteUserId, isInitiator) {
@@ -1669,7 +1685,7 @@ function startRecordingFlow() {
 }
 
 function startRecording() {
-    if (!audioContext || !localSource) {
+    if (!audioContext || !micRecordingGain) {
         alert("Audio graph not ready yet.");
         return;
     }
@@ -1679,15 +1695,20 @@ function startRecording() {
         return;
     }
 
-    // Build list of audio sources to record
-    recordingSources = [];
+    // Create a fresh mixer for this recording session
+    recordingMixerNode = audioContext.createGain();
+    recordingMixerNode.gain.value = 1.0;
 
-    // 1. Add microphone
-    if (localSource) {
-        recordingSources.push(localSource);
+    // Connect mic (with effects) to recording mixer
+    try {
+        micRecordingGain.connect(recordingMixerNode);
+        console.log("✅ Mic connected to recording mixer");
+    } catch (e) {
+        console.error("Could not connect mic to recording mixer:", e);
     }
 
-    // 2. Add backing track if enabled
+    // Handle backing track if enabled
+    let willUseBacking = false;
     if (
         backingTrackConfig &&
         backingTrackConfig.audioDataUrl &&
@@ -1702,21 +1723,37 @@ function startRecording() {
             backingAudioElement.currentTime = 0;
         }
 
-        // Create/connect backing source
-        if (!backingSourceNode) {
-            try {
-                backingSourceNode = audioContext.createMediaElementSource(backingAudioElement);
-                backingSourceNode.connect(audioContext.destination); // So you hear it
-            } catch (e) {
-                console.warn("Could not create backing source:", e);
-            }
-        }
-
+        // Disconnect old backing source if it exists
         if (backingSourceNode) {
-            recordingSources.push(backingSourceNode);
+            try {
+                backingSourceNode.disconnect();
+            } catch (e) {}
         }
 
-        // Start backing track with delay
+        // Create fresh backing source
+        try {
+            backingSourceNode = audioContext.createMediaElementSource(backingAudioElement);
+            
+            // Connect backing to BOTH speakers AND recording mixer
+            backingSourceNode.connect(audioContext.destination); // You hear it
+            backingSourceNode.connect(recordingMixerNode);       // It gets recorded
+            
+            willUseBacking = true;
+            console.log("✅ Backing track connected to recording mixer");
+        } catch (e) {
+            console.error("Could not setup backing track:", e);
+            alert("Could not load backing track for recording");
+        }
+    }
+
+    // Create WAV recorder with the mixer as the single source
+    wavRecorder = new WAVRecorder(audioContext, [recordingMixerNode]);
+    wavRecorder.start();
+    
+    console.log("⏺️ WAV Recording started (with backing:", willUseBacking, ")");
+
+    // Start backing track playback after delay
+    if (willUseBacking) {
         setTimeout(() => {
             const playPromise = backingAudioElement.play();
             if (playPromise && playPromise.catch) {
@@ -1724,17 +1761,9 @@ function startRecording() {
                     console.warn("Backing track playback failed:", err);
                 });
             }
-            console.log("🎵 Backing track started");
+            console.log("🎵 Backing track playing");
         }, 150);
     }
-
-    // 3. TODO: Add remote peer audio sources when you have multiple users
-
-    // Create and start WAV recorder
-    wavRecorder = new WAVRecorder(audioContext, recordingSources);
-    wavRecorder.start();
-    
-    console.log("⏺️ WAV Recording started with", recordingSources.length, "sources");
 }
 
 function stopRecording() {
@@ -1748,9 +1777,24 @@ function stopRecording() {
         backingAudioElement.pause();
     }
 
+    // Disconnect mic from recording mixer
+    if (micRecordingGain && recordingMixerNode) {
+        try {
+            micRecordingGain.disconnect(recordingMixerNode);
+        } catch (e) {}
+    }
+
     // Stop recorder and get WAV blob
     const wavBlob = wavRecorder.stop();
     
+    // Clean up recording mixer
+    if (recordingMixerNode) {
+        try {
+            recordingMixerNode.disconnect();
+        } catch (e) {}
+        recordingMixerNode = null;
+    }
+
     if (!wavBlob) {
         alert("Recording failed - no audio data captured");
         setSessionState(SessionState.IDLE, { recorderId: null });
@@ -1760,7 +1804,7 @@ function stopRecording() {
     // Process the recording
     handleRecordingFinished(wavBlob);
     
-    console.log("⏹️ Recording stopped");
+    console.log("⏹️ Recording stopped and cleaned up");
 }
 
 function handleRecordingFinished(blob) {
